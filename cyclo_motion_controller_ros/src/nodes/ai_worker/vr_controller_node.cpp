@@ -501,15 +501,18 @@ void VRController::controlLoopCallback()
         // This allows external nodes to validate reference-vs-current before control starts.
   Eigen::Affine3d r_gripper_pose_meas = Eigen::Affine3d::Identity();
   Eigen::Affine3d l_gripper_pose_meas = Eigen::Affine3d::Identity();
-  try {
-    kinematics_solver_->updateState(q_, qdot_);
-    r_gripper_pose_meas = kinematics_solver_->getPose(r_gripper_name_);
-    l_gripper_pose_meas = kinematics_solver_->getPose(l_gripper_name_);
-    publishGripperPose(r_gripper_pose_meas, l_gripper_pose_meas);
-  } catch (const std::exception & e) {
-    RCLCPP_WARN_THROTTLE(
+  const bool should_publish_measured_pose = !control_enabled_ || reference_diverged_;
+  if (should_publish_measured_pose) {
+    try {
+      kinematics_solver_->updateState(q_, qdot_);
+      r_gripper_pose_meas = kinematics_solver_->getPose(r_gripper_name_);
+      l_gripper_pose_meas = kinematics_solver_->getPose(l_gripper_name_);
+      publishGripperPose(r_gripper_pose_meas, l_gripper_pose_meas);
+    } catch (const std::exception & e) {
+      RCLCPP_WARN_THROTTLE(
                 this->get_logger(), *this->get_clock(), 2000,
                 "Failed to compute/publish measured gripper pose: %s", e.what());
+    }
   }
 
         // Startup arming: wait for reactivate AND small goal-current pose error for both arms.
