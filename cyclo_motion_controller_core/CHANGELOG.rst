@@ -4,7 +4,8 @@ Changelog for package cyclo_motion_controller_core
 
 0.2.0 (2026-05-04)
 ------------------
-* None
+* Refactored QP solver reinitialization by replacing the local lambda with a helper function.
+* Contributors: Yeonguk Kim
 
 0.1.4 (2026-04-20)
 ------------------
