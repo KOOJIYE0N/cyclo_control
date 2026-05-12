@@ -57,12 +57,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'right_controlled_link',
-            default_value='arm_r_link7',
+            default_value='end_effector_r_link',
             description='Controlled link for the right interactive marker.',
         ),
         DeclareLaunchArgument(
             'left_controlled_link',
-            default_value='arm_l_link7',
+            default_value='end_effector_l_link',
             description='Controlled link for the left interactive marker.',
         ),
         DeclareLaunchArgument(
@@ -74,6 +74,26 @@ def generate_launch_description():
             'left_movel_topic',
             default_value='/l_goal_move',
             description='MoveL topic for the left interactive marker.',
+        ),
+        DeclareLaunchArgument(
+            'right_goal_pose_topic',
+            default_value='/r_goal_pose',
+            description='PoseStamped topic for right goal.',
+        ),
+        DeclareLaunchArgument(
+            'left_goal_pose_topic',
+            default_value='/l_goal_pose',
+            description='PoseStamped topic for left goal.',
+        ),
+        DeclareLaunchArgument(
+            'virtual_object_pose_topic',
+            default_value='/virtual_object_goal_pose',
+            description='PoseStamped topic for virtual object goal.',
+        ),
+        DeclareLaunchArgument(
+            'grasp_capture_topic',
+            default_value='/capture_grasp',
+            description='Bool topic to toggle grasp capture mode.',
         ),
         DeclareLaunchArgument(
             'follower_urdf_path',
@@ -142,7 +162,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'controller_type',
             default_value='movel',
-            description='Controller type (movel, movej, leader, vr). Default: movel.',
+            description='Controller type (movel, movej, bimanual_movel, bimanual_movej, leader, vr). Default: movel.',
         ),
         DeclareLaunchArgument(
             'arm',
@@ -169,6 +189,10 @@ def generate_launch_description():
     left_controlled_link = LaunchConfiguration('left_controlled_link')
     right_movel_topic = LaunchConfiguration('right_movel_topic')
     left_movel_topic = LaunchConfiguration('left_movel_topic')
+    right_goal_pose_topic = LaunchConfiguration('right_goal_pose_topic')
+    left_goal_pose_topic = LaunchConfiguration('left_goal_pose_topic')
+    virtual_object_pose_topic = LaunchConfiguration('virtual_object_pose_topic')
+    grasp_capture_topic = LaunchConfiguration('grasp_capture_topic')
     config_file = LaunchConfiguration('config_file')
     controller_type = LaunchConfiguration('controller_type')
     arm = LaunchConfiguration('arm')
@@ -192,6 +216,8 @@ def generate_launch_description():
             {
                 'urdf_path': follower_urdf_path,
                 'srdf_path': follower_srdf_path,
+                'virtual_object_pose_topic': virtual_object_pose_topic,
+                'grasp_capture_topic': grasp_capture_topic,
             },
         ],
         output='screen',
@@ -213,6 +239,38 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(
             PythonExpression(["'", controller_type, "' == 'movej'"])
+        ),
+    )
+
+    ai_worker_bimanual_movel_controller_node = Node(
+        package='cyclo_motion_controller_ros',
+        executable='ai_worker_bimanual_movel_controller_node',
+        parameters=[
+            config_file,
+            {
+                'urdf_path': follower_urdf_path,
+                'srdf_path': follower_srdf_path,
+            },
+        ],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(["'", controller_type, "' == 'bimanual_movel'"])
+        ),
+    )
+
+    ai_worker_bimanual_movej_controller_node = Node(
+        package='cyclo_motion_controller_ros',
+        executable='ai_worker_bimanual_movej_controller_node',
+        parameters=[
+            config_file,
+            {
+                'urdf_path': follower_urdf_path,
+                'srdf_path': follower_srdf_path,
+            },
+        ],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(["'", controller_type, "' == 'bimanual_movej'"])
         ),
     )
 
@@ -270,6 +328,7 @@ def generate_launch_description():
                 'base_frame': base_frame,
                 'controlled_link': right_controlled_link,
                 'goal_topic': right_movel_topic,
+                'pose_goal_topic': right_goal_pose_topic,
                 'server_name': 'right_goal_marker_server',
                 'marker_name': 'right_goal_marker',
                 'marker_description': 'Right gripper goal',
@@ -283,9 +342,11 @@ def generate_launch_description():
         condition=IfCondition(
             PythonExpression(
                 [
-                    "'",
+                    "('",
                     controller_type,
-                    "' == 'movel' and '",
+                    "' == 'movel' or '",
+                    controller_type,
+                    "' == 'movel') and '",
                     start_interactive_marker,
                     "' == 'true'",
                 ]
@@ -302,6 +363,79 @@ def generate_launch_description():
                 'base_frame': base_frame,
                 'controlled_link': left_controlled_link,
                 'goal_topic': left_movel_topic,
+                'pose_goal_topic': left_goal_pose_topic,
+                'server_name': 'left_goal_marker_server',
+                'marker_name': 'left_goal_marker',
+                'marker_description': 'Left gripper goal',
+                'marker_scale': marker_scale,
+                'marker_color_r': 0.2,
+                'marker_color_g': 0.2,
+                'marker_color_b': 1.0,
+            }
+        ],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "('",
+                    controller_type,
+                    "' == 'movel' or '",
+                    controller_type,
+                    "' == 'movel') and '",
+                    start_interactive_marker,
+                    "' == 'true'",
+                ]
+            )
+        ),
+    )
+
+    right_interactive_marker_bimanual = Node(
+        package='cyclo_motion_controller_ros',
+        executable='interactive_marker_node',
+        name='right_interactive_marker_bimanual_node',
+        parameters=[
+            {
+                'base_frame': base_frame,
+                'controlled_link': right_controlled_link,
+                'goal_topic': right_movel_topic,
+                'pose_goal_topic': right_goal_pose_topic,
+                'active_topic': grasp_capture_topic,
+                'active_invert': True,
+                'server_name': 'right_goal_marker_server',
+                'marker_name': 'right_goal_marker',
+                'marker_description': 'Right gripper goal',
+                'marker_scale': marker_scale,
+                'marker_color_r': 1.0,
+                'marker_color_g': 0.2,
+                'marker_color_b': 0.2,
+            }
+        ],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    controller_type,
+                    "' == 'bimanual_movel' and '",
+                    start_interactive_marker,
+                    "' == 'true'",
+                ]
+            )
+        ),
+    )
+
+    left_interactive_marker_bimanual = Node(
+        package='cyclo_motion_controller_ros',
+        executable='interactive_marker_node',
+        name='left_interactive_marker_bimanual_node',
+        parameters=[
+            {
+                'base_frame': base_frame,
+                'controlled_link': left_controlled_link,
+                'goal_topic': left_movel_topic,
+                'pose_goal_topic': left_goal_pose_topic,
+                'active_topic': grasp_capture_topic,
+                'active_invert': True,
                 'server_name': 'left_goal_marker_server',
                 'marker_name': 'left_goal_marker',
                 'marker_description': 'Left gripper goal',
@@ -317,7 +451,43 @@ def generate_launch_description():
                 [
                     "'",
                     controller_type,
-                    "' == 'movel' and '",
+                    "' == 'bimanual_movel' and '",
+                    start_interactive_marker,
+                    "' == 'true'",
+                ]
+            )
+        ),
+    )
+
+    virtual_object_interactive_marker = Node(
+        package='cyclo_motion_controller_ros',
+        executable='interactive_marker_node',
+        name='virtual_object_interactive_marker_node',
+        parameters=[
+            {
+                'base_frame': base_frame,
+                'controlled_link': right_controlled_link,
+                'secondary_controlled_link': left_controlled_link,
+                'initialize_at_midpoint': True,
+                'goal_topic': right_movel_topic,
+                'pose_goal_topic': virtual_object_pose_topic,
+                'active_topic': grasp_capture_topic,
+                'server_name': 'virtual_object_marker_server',
+                'marker_name': 'virtual_object_marker',
+                'marker_description': 'Virtual object goal',
+                'marker_scale': marker_scale,
+                'marker_color_r': 0.9,
+                'marker_color_g': 0.9,
+                'marker_color_b': 0.2,
+            }
+        ],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    controller_type,
+                    "' == 'bimanual_movel' and '",
                     start_interactive_marker,
                     "' == 'true'",
                 ]
@@ -366,11 +536,16 @@ def generate_launch_description():
         + [
             ai_worker_movel_controller_node,
             ai_worker_movej_controller_node,
+            ai_worker_bimanual_movel_controller_node,
+            ai_worker_bimanual_movej_controller_node,
             leader_controller_node,
             vr_controller_node,
             reference_checker_node,
             right_interactive_marker,
             left_interactive_marker,
+            right_interactive_marker_bimanual,
+            left_interactive_marker_bimanual,
+            virtual_object_interactive_marker,
             arm_retargeting_node,
             hand_retargeting_node,
         ]

@@ -73,6 +73,14 @@ add_executable(ai_worker_movel_controller_node
   src/nodes/ai_worker/ai_worker_movel_controller_node.cpp
 )
 
+add_executable(ai_worker_bimanual_movel_controller_node
+  src/nodes/ai_worker/ai_worker_bimanual_movel_controller_node.cpp
+)
+
+add_executable(ai_worker_bimanual_movej_controller_node
+  src/nodes/ai_worker/ai_worker_bimanual_movej_controller_node.cpp
+)
+
 add_executable(leader_controller_node
   src/nodes/ai_worker/leader_controller_node.cpp
 )
@@ -117,6 +125,18 @@ target_include_directories(ai_worker_movej_controller_node PRIVATE
 )
 
 target_include_directories(ai_worker_movel_controller_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${EIGEN3_INCLUDE_DIR}
+  ${CYCLO_MOTION_CONTROLLER_CORE_NAMESPACE_INCLUDE_DIR}
+)
+
+target_include_directories(ai_worker_bimanual_movel_controller_node PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${EIGEN3_INCLUDE_DIR}
+  ${CYCLO_MOTION_CONTROLLER_CORE_NAMESPACE_INCLUDE_DIR}
+)
+
+target_include_directories(ai_worker_bimanual_movej_controller_node PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}
   ${CYCLO_MOTION_CONTROLLER_CORE_NAMESPACE_INCLUDE_DIR}
@@ -218,6 +238,46 @@ target_link_libraries(ai_worker_movel_controller_node PRIVATE
   ${sensor_msgs_LIBRARIES}
   ${trajectory_msgs_LIBRARIES}
   ${robotis_interfaces_TARGETS}
+  ${rclcpp_TARGETS}
+  ${std_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
+  ${trajectory_msgs_TARGETS}
+)
+
+target_include_directories(ai_worker_bimanual_movel_controller_node PRIVATE
+  ${rclcpp_INCLUDE_DIRS}
+  ${std_msgs_INCLUDE_DIRS}
+  ${geometry_msgs_INCLUDE_DIRS}
+  ${sensor_msgs_INCLUDE_DIRS}
+  ${trajectory_msgs_INCLUDE_DIRS}
+)
+target_link_libraries(ai_worker_bimanual_movel_controller_node PRIVATE
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${geometry_msgs_LIBRARIES}
+  ${sensor_msgs_LIBRARIES}
+  ${trajectory_msgs_LIBRARIES}
+  ${rclcpp_TARGETS}
+  ${std_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
+  ${trajectory_msgs_TARGETS}
+)
+
+target_include_directories(ai_worker_bimanual_movej_controller_node PRIVATE
+  ${rclcpp_INCLUDE_DIRS}
+  ${std_msgs_INCLUDE_DIRS}
+  ${geometry_msgs_INCLUDE_DIRS}
+  ${sensor_msgs_INCLUDE_DIRS}
+  ${trajectory_msgs_INCLUDE_DIRS}
+)
+target_link_libraries(ai_worker_bimanual_movej_controller_node PRIVATE
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${geometry_msgs_LIBRARIES}
+  ${sensor_msgs_LIBRARIES}
+  ${trajectory_msgs_LIBRARIES}
   ${rclcpp_TARGETS}
   ${std_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
@@ -340,6 +400,7 @@ target_link_libraries(omy_movel_controller_node PRIVATE
 target_include_directories(interactive_marker_node PRIVATE
   ${robotis_interfaces_INCLUDE_DIRS}
   ${rclcpp_INCLUDE_DIRS}
+  ${std_msgs_INCLUDE_DIRS}
   ${geometry_msgs_INCLUDE_DIRS}
   ${visualization_msgs_INCLUDE_DIRS}
   ${interactive_markers_INCLUDE_DIRS}
@@ -348,12 +409,14 @@ target_include_directories(interactive_marker_node PRIVATE
 target_link_libraries(interactive_marker_node PRIVATE
   ${robotis_interfaces_LIBRARIES}
   ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
   ${geometry_msgs_LIBRARIES}
   ${visualization_msgs_LIBRARIES}
   ${interactive_markers_LIBRARIES}
   ${tf2_ros_LIBRARIES}
   ${robotis_interfaces_TARGETS}
   ${rclcpp_TARGETS}
+  ${std_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
   ${visualization_msgs_TARGETS}
   ${interactive_markers_TARGETS}
@@ -387,6 +450,18 @@ target_link_libraries(ai_worker_movej_controller_node PRIVATE
 )
 
 target_link_libraries(ai_worker_movel_controller_node PRIVATE
+  Eigen3::Eigen
+  pinocchio::pinocchio
+  OsqpEigen::OsqpEigen
+)
+
+target_link_libraries(ai_worker_bimanual_movel_controller_node PRIVATE
+  Eigen3::Eigen
+  pinocchio::pinocchio
+  OsqpEigen::OsqpEigen
+)
+
+target_link_libraries(ai_worker_bimanual_movej_controller_node PRIVATE
   Eigen3::Eigen
   pinocchio::pinocchio
   OsqpEigen::OsqpEigen
@@ -427,6 +502,8 @@ if(cyclo_motion_controller_core_FOUND)
   target_link_libraries(vr_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
   target_link_libraries(ai_worker_movej_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
   target_link_libraries(ai_worker_movel_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
+  target_link_libraries(ai_worker_bimanual_movel_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
+  target_link_libraries(ai_worker_bimanual_movej_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
   target_link_libraries(leader_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
   target_link_libraries(omx_movej_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
   target_link_libraries(omx_movel_controller_node PRIVATE cyclo_motion_controller_core::cyclo_motion_controller_core)
@@ -437,6 +514,8 @@ else()
   target_link_libraries(vr_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
   target_link_libraries(ai_worker_movej_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
   target_link_libraries(ai_worker_movel_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
+  target_link_libraries(ai_worker_bimanual_movel_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
+  target_link_libraries(ai_worker_bimanual_movej_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
   target_link_libraries(leader_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
   target_link_libraries(omx_movej_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
   target_link_libraries(omx_movel_controller_node PRIVATE ${CYCLO_MOTION_CONTROLLER_CORE_LIB})
@@ -454,6 +533,14 @@ install(TARGETS ai_worker_movej_controller_node
 )
 
 install(TARGETS ai_worker_movel_controller_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS ai_worker_bimanual_movel_controller_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS ai_worker_bimanual_movej_controller_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
