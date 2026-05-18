@@ -158,6 +158,7 @@ private:
   double slow_start_exit_ori_threshold_deg_ = 10.0;      // degrees
   double startup_slow_start_linear_vel_ = 0.05;          // m/s
   double startup_slow_start_angular_vel_ = 0.35;         // rad/s
+  double slow_start_angular_boost_factor_ = 3.0;         // dimensionless
   bool slow_start_active_ = false;
   bool slow_start_release_active_ = false;
   rclcpp::Time slow_start_release_start_;

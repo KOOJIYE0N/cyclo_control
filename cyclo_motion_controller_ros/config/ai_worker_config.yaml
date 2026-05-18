@@ -103,6 +103,7 @@ vr_controller:
     slow_start_exit_ori_threshold_deg: 20.0
     slow_start_linear_velocity: 1.0
     slow_start_angular_velocity: 3.0
+    slow_start_angular_boost_factor: 3.0
 
 leader_controller:
   ros__parameters:

@@ -101,6 +101,8 @@ VRController::VRController()
     this->declare_parameter("slow_start_linear_velocity", 0.05);
   startup_slow_start_angular_vel_ =
     this->declare_parameter("slow_start_angular_velocity", 0.35);
+  slow_start_angular_boost_factor_ =
+    this->declare_parameter("slow_start_angular_boost_factor", 3.0);
 
   dt_ = time_step_;
   last_joint_state_time_ = this->now();
@@ -716,13 +718,16 @@ void VRController::controlLoopCallback()
 
     const auto compute_slow_start_velocity =
       [](const Eigen::Affine3d & current_pose, const Eigen::Affine3d & goal_pose,
-        const double linear_speed, const double angular_speed) {
+        const double linear_speed, const double angular_speed, const double pos_err,
+        const double pos_exit_threshold, const double angular_boost_factor) {
         cyclo_motion_controller::common::Vector6d vel =
           cyclo_motion_controller::common::Vector6d::Zero();
         const Eigen::Vector3d pos_error = goal_pose.translation() - current_pose.translation();
         const double pos_norm = pos_error.norm();
-        if (pos_norm > 1e-9) {
-          vel.head(3) = pos_error / pos_norm * linear_speed;
+        if (pos_norm > 1e-9 && pos_exit_threshold > 1e-9) {
+          // Smoothly reduce linear speed as position converges (continuous, no deadband).
+          const double ratio = std::clamp(pos_err / pos_exit_threshold, 0.0, 1.0);
+          vel.head(3) = pos_error / pos_norm * (linear_speed * ratio);
         }
 
         const Eigen::Matrix3d rotation_error = goal_pose.linear() * current_pose.linear().transpose();
@@ -731,17 +736,23 @@ void VRController::controlLoopCallback()
           angle_axis_error.axis() * angle_axis_error.angle();
         const double ori_norm = ori_error.norm();
         if (ori_norm > 1e-9) {
-          vel.tail(3) = ori_error / ori_norm * angular_speed;
+          // As translation converges, allow faster pure-orientation convergence.
+          const double ratio = (pos_exit_threshold > 1e-9) ?
+            std::clamp(pos_err / pos_exit_threshold, 0.0, 1.0) : 1.0;
+          const double boost = 1.0 + (1.0 - ratio) * std::max(0.0, angular_boost_factor - 1.0);
+          vel.tail(3) = ori_error / ori_norm * (angular_speed * boost);
         }
         return vel;
       };
 
     const cyclo_motion_controller::common::Vector6d right_slow_vel =
       compute_slow_start_velocity(
-      right_gripper_pose_, r_goal_pose_, startup_slow_start_linear_vel_, startup_slow_start_angular_vel_);
+      right_gripper_pose_, r_goal_pose_, startup_slow_start_linear_vel_, startup_slow_start_angular_vel_,
+      r_pos_err, slow_start_exit_pos_threshold_, slow_start_angular_boost_factor_);
     const cyclo_motion_controller::common::Vector6d left_slow_vel =
       compute_slow_start_velocity(
-      left_gripper_pose_, l_goal_pose_, startup_slow_start_linear_vel_, startup_slow_start_angular_vel_);
+      left_gripper_pose_, l_goal_pose_, startup_slow_start_linear_vel_, startup_slow_start_angular_vel_,
+      l_pos_err, slow_start_exit_pos_threshold_, slow_start_angular_boost_factor_);
     const cyclo_motion_controller::common::Vector6d right_normal_vel =
       computeDesiredVelocity(right_gripper_pose_, r_goal_pose_);
     const cyclo_motion_controller::common::Vector6d left_normal_vel =
