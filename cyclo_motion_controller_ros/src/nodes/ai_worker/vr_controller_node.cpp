@@ -30,7 +30,6 @@ VRController::VRController()
   r_elbow_pose_received_(false),
   l_elbow_pose_received_(false),
   reference_diverged_(true),
-  activate_pending_(false),
   joint_state_received_(false),
   dt_(0.01)
 {
@@ -38,8 +37,6 @@ VRController::VRController()
   RCLCPP_INFO(this->get_logger(), "VR Controller - Starting up...");
   RCLCPP_INFO(this->get_logger(), "Node name: %s", this->get_name());
   RCLCPP_INFO(this->get_logger(), "========================================");
-  activate_start_ = this->get_clock()->now();
-
         // Load parameters
   control_frequency_ = this->declare_parameter("control_frequency", 100.0);
   time_step_ = this->declare_parameter("time_step", 0.01);
@@ -69,13 +66,6 @@ VRController::VRController()
       std::string("/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"));
   left_traj_topic_ = this->declare_parameter("left_traj_topic",
       std::string("/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"));
-  right_raw_traj_topic_ = this->declare_parameter(
-            "right_raw_traj_topic",
-            std::string("/leader/joint_trajectory_command_broadcaster_right/raw_joint_trajectory"));
-  left_raw_traj_topic_ = this->declare_parameter(
-            "left_raw_traj_topic",
-            std::string("/leader/joint_trajectory_command_broadcaster_left/raw_joint_trajectory"));
-  raw_traj_timeout_ = this->declare_parameter("raw_traj_timeout", 0.5);
   lift_topic_ = this->declare_parameter("lift_topic",
       std::string("/leader/joystick_controller_right/joint_trajectory"));
   lift_vel_bound_ = this->declare_parameter("lift_vel_bound", 0.0);
@@ -87,27 +77,21 @@ VRController::VRController()
   l_gripper_name_ = this->declare_parameter("l_gripper_name", std::string("arm_l_link7"));
   r_elbow_name_ = this->declare_parameter("r_elbow_name", std::string("arm_r_link4"));
   l_elbow_name_ = this->declare_parameter("l_elbow_name", std::string("arm_l_link4"));
-  right_gripper_joint_name_ = this->declare_parameter("right_gripper_joint",
-      std::string("gripper_r_joint1"));
-  left_gripper_joint_name_ = this->declare_parameter("left_gripper_joint",
-      std::string("gripper_l_joint1"));
   startup_ref_pos_threshold_ = this->declare_parameter("startup_ref_pos_threshold", 0.15);
   startup_ref_ori_threshold_deg_ = this->declare_parameter("startup_ref_ori_threshold_deg", 45.0);
-  slow_start_exit_pos_threshold_ =
-    this->declare_parameter("slow_start_exit_pos_threshold", 0.03);
-  slow_start_exit_ori_threshold_deg_ =
-    this->declare_parameter("slow_start_exit_ori_threshold_deg", 10.0);
+  slow_start_exit_pos_threshold_ = 0.1;
+  slow_start_exit_ori_threshold_deg_ = 20.0;
+  slow_start_release_duration_ = 0.5;
+  slow_start_feedback_blend_ = 0.65;
+  slow_start_linear_orientation_coupling_ = 0.6;
+  slow_start_linear_min_scale_ = 0.25;
   startup_slow_start_linear_vel_ =
     this->declare_parameter("slow_start_linear_velocity", 0.05);
   startup_slow_start_angular_vel_ =
     this->declare_parameter("slow_start_angular_velocity", 0.35);
-  slow_start_angular_boost_factor_ =
-    this->declare_parameter("slow_start_angular_boost_factor", 3.0);
 
   dt_ = time_step_;
   last_joint_state_time_ = this->now();
-  last_right_raw_traj_time_ = this->now();
-  last_left_raw_traj_time_ = this->now();
 
         // Initialize subscribers
   r_goal_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
@@ -129,14 +113,6 @@ VRController::VRController()
   joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
             joint_states_topic_, 10,
             std::bind(&VRController::jointStateCallback, this, std::placeholders::_1));
-
-  right_raw_traj_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
-            right_raw_traj_topic_, 10,
-            std::bind(&VRController::rightRawTrajectoryCallback, this,
-      std::placeholders::_1));
-  left_raw_traj_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
-            left_raw_traj_topic_, 10,
-            std::bind(&VRController::leftRawTrajectoryCallback, this, std::placeholders::_1));
 
   ref_divergence_sub_ = this->create_subscription<std_msgs::msg::Bool>(
             "/reference_diverged", 10,
@@ -338,52 +314,6 @@ void VRController::leftElbowPoseCallback(const geometry_msgs::msg::PoseStamped::
             msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
 }
 
-void VRController::rightRawTrajectoryCallback(
-  const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
-{
-  if (!msg || msg->points.empty()) {
-    return;
-  }
-  const auto & point = msg->points.front();
-  if (point.positions.empty()) {
-    return;
-  }
-  for (size_t i = 0; i < msg->joint_names.size(); ++i) {
-    if (msg->joint_names[i] != right_gripper_joint_name_) {
-      continue;
-    }
-    if (i < point.positions.size()) {
-      right_raw_gripper_position_ = point.positions[i];
-      right_raw_gripper_received_ = true;
-      last_right_raw_traj_time_ = this->now();
-    }
-    return;
-  }
-}
-
-void VRController::leftRawTrajectoryCallback(
-  const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
-{
-  if (!msg || msg->points.empty()) {
-    return;
-  }
-  const auto & point = msg->points.front();
-  if (point.positions.empty()) {
-    return;
-  }
-  for (size_t i = 0; i < msg->joint_names.size(); ++i) {
-    if (msg->joint_names[i] != left_gripper_joint_name_) {
-      continue;
-    }
-    if (i < point.positions.size()) {
-      left_raw_gripper_position_ = point.positions[i];
-      left_raw_gripper_received_ = true;
-      last_left_raw_traj_time_ = this->now();
-    }
-    return;
-  }
-}
-
 void VRController::jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
   try {
@@ -399,7 +329,7 @@ void VRController::jointStateCallback(const sensor_msgs::msg::JointState::Shared
     joint_state_received_ = true;
     joint_state_timeout_active_ = false;
 
-    if (!start_requested_ || !control_enabled_ || activate_pending_ || reference_diverged_) {
+    if (!start_requested_ || !control_enabled_ || reference_diverged_) {
       syncCommandStateToFeedback();
     }
   } catch (const std::exception & e) {
@@ -412,8 +342,11 @@ void VRController::referenceDivergenceCallback(const std_msgs::msg::Bool::Shared
   if (!msg->data) {
     return;
   }
-        // Ignore reference divergence if controller is activating
-  if (activate_pending_) {
+  // Ignore reference divergence if controller is activating
+  if (slow_start_active_ || slow_start_release_active_) {
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(), *this->get_clock(), 2000,
+      "Ignoring reference divergence during activation.");
     return;
   }
   if (!reference_diverged_) {
@@ -439,7 +372,6 @@ void VRController::reactivateCallback(const std_msgs::msg::Bool::SharedPtr msg)
       reactivate_topic_.c_str());
     start_requested_ = true;
     control_enabled_ = false;
-    activate_pending_ = false;
     reference_diverged_ = true;
     slow_start_active_ = false;
     slow_start_release_active_ = false;
@@ -450,7 +382,6 @@ void VRController::reactivateCallback(const std_msgs::msg::Bool::SharedPtr msg)
       reactivate_topic_.c_str());
     start_requested_ = false;
     control_enabled_ = false;
-    activate_pending_ = false;
     reference_diverged_ = true;
     slow_start_active_ = false;
     slow_start_release_active_ = false;
@@ -501,7 +432,6 @@ void VRController::controlLoopCallback()
     if (!joint_state_timeout_active_) {
       joint_state_timeout_active_ = true;
       control_enabled_ = false;
-      activate_pending_ = false;
       reference_diverged_ = true;
       slow_start_active_ = false;
       slow_start_release_active_ = false;
@@ -612,26 +542,13 @@ void VRController::controlLoopCallback()
 
             // Arm controller once startup check passes.
     control_enabled_ = true;
-    activate_start_ = this->get_clock()->now();
-    activate_pending_ = true;
-    reference_diverged_ = true;          // will be cleared after activation delay
+    reference_diverged_ = false;
     slow_start_active_ = true;
     slow_start_release_active_ = false;
     syncCommandStateToFeedback();
     RCLCPP_WARN(
                 this->get_logger(),
                 "Goals available. Activating controller with startup slow-start.");
-  }
-
-  if (activate_pending_) {
-    syncCommandStateToFeedback();
-    const auto elapsed = this->get_clock()->now() - activate_start_;
-    if (elapsed.seconds() >= 3.0) {
-      reference_diverged_ = false;
-      activate_pending_ = false;
-      syncCommandStateToFeedback();
-      RCLCPP_WARN(this->get_logger(), "Controller activated.");
-    }
   }
 
   if (reference_diverged_) {
@@ -644,9 +561,10 @@ void VRController::controlLoopCallback()
   try {
             // kinematics_solver_->updateState(q_, qdot_);
             // Use previously commanded joint goals as feedback state
-    Eigen::VectorXd q_feedback = q_;
-    if (!slow_start_active_ && !slow_start_release_active_) {
-      q_feedback = (q_desired_.size() == q_.size()) ? q_desired_ : q_;
+    Eigen::VectorXd q_feedback = (q_desired_.size() == q_.size()) ? q_desired_ : q_;
+    if (slow_start_active_ || slow_start_release_active_) {
+      const double blend = std::clamp(slow_start_feedback_blend_, 0.0, 1.0);
+      q_feedback = blend * q_ + (1.0 - blend) * q_feedback;
     }
 
     // If lift is commanded by another node, use measured lift state for
@@ -664,11 +582,6 @@ void VRController::controlLoopCallback()
     Eigen::Affine3d right_elbow_pose = kinematics_solver_->getPose(r_elbow_name_);
     Eigen::Affine3d left_elbow_pose = kinematics_solver_->getPose(l_elbow_name_);
 
-            // Initialize goals to current EE pose on first cycle if not received
-    if (!r_goal_pose_received_ && !l_goal_pose_received_) {
-      r_goal_pose_ = right_gripper_pose_;
-      l_goal_pose_ = left_gripper_pose_;
-    }
     if (!r_elbow_pose_received_) {
       r_elbow_pose_ = right_elbow_pose;
     }
@@ -707,7 +620,7 @@ void VRController::controlLoopCallback()
       slow_start_release_start_ = this->get_clock()->now();
       RCLCPP_WARN(
         this->get_logger(),
-        "Startup slow-start reached threshold. Blending into normal tracking.");
+        "Startup slow-start reached threshold.");
     }
 
             // Compute desired velocity.
@@ -718,41 +631,39 @@ void VRController::controlLoopCallback()
 
     const auto compute_slow_start_velocity =
       [](const Eigen::Affine3d & current_pose, const Eigen::Affine3d & goal_pose,
-        const double linear_speed, const double angular_speed, const double pos_err,
-        const double pos_exit_threshold, const double angular_boost_factor) {
+        const double linear_speed, const double angular_speed, const double lin_ori_coupling,
+        const double lin_min_scale) {
         cyclo_motion_controller::common::Vector6d vel =
           cyclo_motion_controller::common::Vector6d::Zero();
         const Eigen::Vector3d pos_error = goal_pose.translation() - current_pose.translation();
-        const double pos_norm = pos_error.norm();
-        if (pos_norm > 1e-9 && pos_exit_threshold > 1e-9) {
-          // Smoothly reduce linear speed as position converges (continuous, no deadband).
-          const double ratio = std::clamp(pos_err / pos_exit_threshold, 0.0, 1.0);
-          vel.head(3) = pos_error / pos_norm * (linear_speed * ratio);
-        }
-
         const Eigen::Matrix3d rotation_error = goal_pose.linear() * current_pose.linear().transpose();
         const Eigen::AngleAxisd angle_axis_error(rotation_error);
         const Eigen::Vector3d ori_error =
           angle_axis_error.axis() * angle_axis_error.angle();
         const double ori_norm = ori_error.norm();
+
+        const double linear_scale =
+          std::max(lin_min_scale, 1.0 / (1.0 + lin_ori_coupling * ori_norm));
+        const double pos_norm = pos_error.norm();
+        if (pos_norm > 1e-9) {
+          vel.head(3) = pos_error / pos_norm * (linear_speed * linear_scale);
+        }
         if (ori_norm > 1e-9) {
-          // As translation converges, allow faster pure-orientation convergence.
-          const double ratio = (pos_exit_threshold > 1e-9) ?
-            std::clamp(pos_err / pos_exit_threshold, 0.0, 1.0) : 1.0;
-          const double boost = 1.0 + (1.0 - ratio) * std::max(0.0, angular_boost_factor - 1.0);
-          vel.tail(3) = ori_error / ori_norm * (angular_speed * boost);
+          vel.tail(3) = ori_error / ori_norm * angular_speed;
         }
         return vel;
       };
 
     const cyclo_motion_controller::common::Vector6d right_slow_vel =
       compute_slow_start_velocity(
-      right_gripper_pose_, r_goal_pose_, startup_slow_start_linear_vel_, startup_slow_start_angular_vel_,
-      r_pos_err, slow_start_exit_pos_threshold_, slow_start_angular_boost_factor_);
+      right_gripper_pose_, r_goal_pose_, startup_slow_start_linear_vel_,
+      startup_slow_start_angular_vel_, slow_start_linear_orientation_coupling_,
+      slow_start_linear_min_scale_);
     const cyclo_motion_controller::common::Vector6d left_slow_vel =
       compute_slow_start_velocity(
-      left_gripper_pose_, l_goal_pose_, startup_slow_start_linear_vel_, startup_slow_start_angular_vel_,
-      l_pos_err, slow_start_exit_pos_threshold_, slow_start_angular_boost_factor_);
+      left_gripper_pose_, l_goal_pose_, startup_slow_start_linear_vel_,
+      startup_slow_start_angular_vel_, slow_start_linear_orientation_coupling_,
+      slow_start_linear_min_scale_);
     const cyclo_motion_controller::common::Vector6d right_normal_vel =
       computeDesiredVelocity(right_gripper_pose_, r_goal_pose_);
     const cyclo_motion_controller::common::Vector6d left_normal_vel =
@@ -761,25 +672,18 @@ void VRController::controlLoopCallback()
     if (slow_start_active_) {
       right_desired_vel = right_slow_vel;
       left_desired_vel = left_slow_vel;
-      RCLCPP_WARN_THROTTLE(
-        this->get_logger(), *this->get_clock(), 2000,
-        "Startup slow-start active. "
-        "R(pos=%.3f m, ori=%.1f deg) L(pos=%.3f m, ori=%.1f deg) "
-        "(thr pos=%.3f m, ori=%.1f deg)",
-        r_pos_err, r_ori_err, l_pos_err, l_ori_err, slow_start_exit_pos_threshold_,
-        slow_start_exit_ori_threshold_deg_);
     } else if (slow_start_release_active_) {
       double alpha = 1.0;
-      if (0.5 > 1e-6) {
+      if (slow_start_release_duration_ > 1e-6) {
         const double t =
           (this->get_clock()->now() - slow_start_release_start_).seconds();
-        alpha = std::clamp(t / 0.5, 0.0, 1.0);
+        alpha = std::clamp(t / slow_start_release_duration_, 0.0, 1.0);
       }
       right_desired_vel = (1.0 - alpha) * right_slow_vel + alpha * right_normal_vel;
       left_desired_vel = (1.0 - alpha) * left_slow_vel + alpha * left_normal_vel;
       if (alpha >= 1.0) {
         slow_start_release_active_ = false;
-        RCLCPP_WARN(this->get_logger(), "Startup slow-start blend complete.");
+        RCLCPP_WARN(this->get_logger(), "Startup slow-start complete. Switching to normal tracking.");
       }
     } else {
       right_desired_vel = right_normal_vel;

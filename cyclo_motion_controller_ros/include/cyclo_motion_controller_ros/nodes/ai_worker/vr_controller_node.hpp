@@ -76,9 +76,6 @@ private:
   std::string joint_states_topic_;
   std::string right_traj_topic_;
   std::string left_traj_topic_;
-  std::string right_raw_traj_topic_;
-  std::string left_raw_traj_topic_;
-  double raw_traj_timeout_;
   std::string lift_topic_;
   double lift_vel_bound_;
   std::string r_gripper_pose_topic_;
@@ -87,8 +84,6 @@ private:
   std::string l_gripper_name_;
   std::string r_elbow_name_;
   std::string l_elbow_name_;
-  std::string right_gripper_joint_name_;
-  std::string left_gripper_joint_name_;
   std::string urdf_path_;
   std::string srdf_path_;
 
@@ -98,8 +93,6 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr r_elbow_pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr l_elbow_pose_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
-  rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr right_raw_traj_sub_;
-  rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr left_raw_traj_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr ref_divergence_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr reactivate_sub_;
 
@@ -143,8 +136,6 @@ private:
   bool r_elbow_pose_received_;
   bool l_elbow_pose_received_;
   bool reference_diverged_;
-  rclcpp::Time activate_start_;
-  bool activate_pending_;
   bool control_enabled_ = false;        // start only after reactivate service
   bool start_requested_ = false;        // reactivate has been requested
   bool joint_state_received_;
@@ -154,23 +145,18 @@ private:
         // Startup reference vs current pose check
   double startup_ref_pos_threshold_ = 0.15;              // meters
   double startup_ref_ori_threshold_deg_ = 45.0;          // degrees
-  double slow_start_exit_pos_threshold_ = 0.03;          // meters
-  double slow_start_exit_ori_threshold_deg_ = 10.0;      // degrees
+  double slow_start_exit_pos_threshold_ = 0.1;          // meters
+  double slow_start_exit_ori_threshold_deg_ = 20.0;      // degrees
   double startup_slow_start_linear_vel_ = 0.05;          // m/s
   double startup_slow_start_angular_vel_ = 0.35;         // rad/s
-  double slow_start_angular_boost_factor_ = 3.0;         // dimensionless
+  double slow_start_release_duration_ = 1.0;             // sec
+  double slow_start_feedback_blend_ = 0.65;              // 0: commanded only, 1: measured only
+  double slow_start_linear_orientation_coupling_ = 0.6;  // (rad^-1)
+  double slow_start_linear_min_scale_ = 0.25;            // [0, 1]
   bool slow_start_active_ = false;
   bool slow_start_release_active_ = false;
   rclcpp::Time slow_start_release_start_;
-
-        // Latest gripper positions from raw joint trajectory (leader side)
-  bool right_raw_gripper_received_ = false;
-  bool left_raw_gripper_received_ = false;
-  double right_raw_gripper_position_ = 0.0;
-  double left_raw_gripper_position_ = 0.0;
   rclcpp::Time last_joint_state_time_;
-  rclcpp::Time last_right_raw_traj_time_;
-  rclcpp::Time last_left_raw_traj_time_;
 
         // Control timing
   double dt_;        // nominal time step in seconds
@@ -192,8 +178,6 @@ private:
   void rightElbowPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void leftElbowPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
-  void rightRawTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
-  void leftRawTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
   void referenceDivergenceCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void reactivateCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void controlLoopCallback();
