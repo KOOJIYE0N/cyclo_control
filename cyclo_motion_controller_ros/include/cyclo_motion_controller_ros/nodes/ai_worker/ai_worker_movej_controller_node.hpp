@@ -48,6 +48,28 @@ private:
   void syncCommandStateToFeedback();
   void syncRightArmToFeedback();
   void syncLeftArmToFeedback();
+  void updateSlowStartWatchdogs();
+  void startArmSlowStart(
+    const std::string & arm_name,
+    const std::vector<std::string> & arm_joint_names,
+    bool & slow_start_active,
+    const std::string & reason);
+  Eigen::VectorXd computeArmDesiredJointVelocity(
+    const Eigen::VectorXd & q_feedback,
+    const Eigen::VectorXd & q_reference,
+    const Eigen::VectorXd & qdot_reference,
+    const std::vector<std::string> & arm_joint_names,
+    bool slow_start_active,
+    bool & slow_start_reached) const;
+  void updateArmTimedReference(
+    const std::vector<std::string> & arm_joint_names,
+    const Eigen::VectorXd & arm_start,
+    const Eigen::VectorXd & arm_goal,
+    const rclcpp::Time & start_time,
+    double duration,
+    bool & timed_motion_active,
+    Eigen::VectorXd & q_reference,
+    Eigen::VectorXd & qdot_reference) const;
 
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void rightTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
@@ -86,6 +108,9 @@ private:
   double collision_buffer_;
   double collision_safe_distance_;
   double joint_state_timeout_;
+  double slow_start_joint_velocity_;
+  double slow_start_joint_threshold_;
+  int command_watchdog_loops_;
   std::string joint_states_topic_;
   std::string right_traj_topic_;
   std::string left_traj_topic_;
@@ -122,6 +147,18 @@ private:
   bool right_movej_target_initialized_;
   bool left_movej_target_initialized_;
   bool joint_state_timeout_active_ = false;
+  bool right_zero_duration_watchdog_active_ = false;
+  bool left_zero_duration_watchdog_active_ = false;
+  bool right_slow_start_active_ = false;
+  bool left_slow_start_active_ = false;
+  bool right_timed_motion_active_ = false;
+  bool left_timed_motion_active_ = false;
+  int right_zero_duration_missed_loops_ = 0;
+  int left_zero_duration_missed_loops_ = 0;
+  double right_movej_duration_ = 0.0;
+  double left_movej_duration_ = 0.0;
+  rclcpp::Time right_movej_start_time_;
+  rclcpp::Time left_movej_start_time_;
 
   double right_gripper_position_;
   double left_gripper_position_;

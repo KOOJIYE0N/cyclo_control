@@ -17,6 +17,7 @@
 #include "cyclo_motion_controller_ros/nodes/ai_worker/ai_worker_movej_controller_node.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cyclo_motion_controller_ros
 {
@@ -46,6 +47,9 @@ AIWorkerMoveJController::AIWorkerMoveJController()
   collision_buffer_ = this->declare_parameter("collision_buffer", 0.05);
   collision_safe_distance_ = this->declare_parameter("collision_safe_distance", 0.02);
   joint_state_timeout_ = this->declare_parameter("joint_state_timeout", 0.5);
+  slow_start_joint_velocity_ = this->declare_parameter("slow_start_joint_velocity", 0.3);
+  slow_start_joint_threshold_ = this->declare_parameter("slow_start_joint_threshold", 0.01);
+  command_watchdog_loops_ = this->declare_parameter("command_watchdog_loops", 5);
   urdf_path_ = this->declare_parameter("urdf_path", std::string(""));
   srdf_path_ = this->declare_parameter("srdf_path", std::string(""));
   joint_states_topic_ = this->declare_parameter("joint_states_topic", std::string("/joint_states"));
@@ -287,8 +291,8 @@ void AIWorkerMoveJController::rightTrajectoryCallback(
   }
 
   const auto duration = rclcpp::Duration(msg->points.front().time_from_start).seconds();
-  if (duration <= -1) {
-    RCLCPP_WARN(this->get_logger(), "Right moveJ ignored: time_from_start must be > -1.");
+  if (duration < 0.0) {
+    RCLCPP_WARN(this->get_logger(), "Right moveJ ignored: time_from_start must be >= 0.");
     return;
   }
 
@@ -305,6 +309,27 @@ void AIWorkerMoveJController::rightTrajectoryCallback(
   right_movej_start_ = q_commanded_;
   right_movej_goal_ = target_q;
   right_movej_target_initialized_ = true;
+
+  if (duration > 0.0) {
+    right_zero_duration_watchdog_active_ = false;
+    right_zero_duration_missed_loops_ = 0;
+    right_slow_start_active_ = false;
+    right_timed_motion_active_ = true;
+    right_movej_duration_ = duration;
+    right_movej_start_time_ = this->now();
+  } else {
+    right_timed_motion_active_ = false;
+    const bool should_start_slow_start =
+      !right_zero_duration_watchdog_active_ ||
+      right_zero_duration_missed_loops_ >= command_watchdog_loops_;
+    right_zero_duration_watchdog_active_ = true;
+    right_zero_duration_missed_loops_ = 0;
+    if (should_start_slow_start) {
+      startArmSlowStart(
+        "Right", right_arm_joints_, right_slow_start_active_,
+        "zero-duration moveJ command received");
+    }
+  }
 }
 
 void AIWorkerMoveJController::leftTrajectoryCallback(
@@ -318,8 +343,8 @@ void AIWorkerMoveJController::leftTrajectoryCallback(
   }
 
   const auto duration = rclcpp::Duration(msg->points.front().time_from_start).seconds();
-  if (duration <= -1) {
-    RCLCPP_WARN(this->get_logger(), "Left moveJ ignored: time_from_start must be > -1.");
+  if (duration < 0.0) {
+    RCLCPP_WARN(this->get_logger(), "Left moveJ ignored: time_from_start must be >= 0.");
     return;
   }
 
@@ -336,6 +361,27 @@ void AIWorkerMoveJController::leftTrajectoryCallback(
   left_movej_start_ = q_commanded_;
   left_movej_goal_ = target_q;
   left_movej_target_initialized_ = true;
+
+  if (duration > 0.0) {
+    left_zero_duration_watchdog_active_ = false;
+    left_zero_duration_missed_loops_ = 0;
+    left_slow_start_active_ = false;
+    left_timed_motion_active_ = true;
+    left_movej_duration_ = duration;
+    left_movej_start_time_ = this->now();
+  } else {
+    left_timed_motion_active_ = false;
+    const bool should_start_slow_start =
+      !left_zero_duration_watchdog_active_ ||
+      left_zero_duration_missed_loops_ >= command_watchdog_loops_;
+    left_zero_duration_watchdog_active_ = true;
+    left_zero_duration_missed_loops_ = 0;
+    if (should_start_slow_start) {
+      startArmSlowStart(
+        "Left", left_arm_joints_, left_slow_start_active_,
+        "zero-duration moveJ command received");
+    }
+  }
 }
 
 void AIWorkerMoveJController::assignArmSegment(
@@ -349,6 +395,138 @@ void AIWorkerMoveJController::assignArmSegment(
       continue;
     }
     destination[it->second] = source[it->second];
+  }
+}
+
+void AIWorkerMoveJController::updateSlowStartWatchdogs()
+{
+  if (command_watchdog_loops_ <= 0) {
+    return;
+  }
+
+  if (right_zero_duration_watchdog_active_) {
+    ++right_zero_duration_missed_loops_;
+    if (
+      right_zero_duration_missed_loops_ == command_watchdog_loops_ &&
+      !right_slow_start_active_)
+    {
+      startArmSlowStart(
+        "Right", right_arm_joints_, right_slow_start_active_,
+        "zero-duration command stream missed watchdog");
+    }
+  }
+
+  if (left_zero_duration_watchdog_active_) {
+    ++left_zero_duration_missed_loops_;
+    if (
+      left_zero_duration_missed_loops_ == command_watchdog_loops_ &&
+      !left_slow_start_active_)
+    {
+      startArmSlowStart(
+        "Left", left_arm_joints_, left_slow_start_active_,
+        "zero-duration command stream missed watchdog");
+    }
+  }
+}
+
+void AIWorkerMoveJController::startArmSlowStart(
+  const std::string & arm_name,
+  const std::vector<std::string> & arm_joint_names,
+  bool & slow_start_active,
+  const std::string & reason)
+{
+  assignArmSegment(q_, arm_joint_names, q_commanded_);
+  slow_start_active = true;
+  RCLCPP_WARN(
+    this->get_logger(),
+    "%s moveJ slow-start: %s. Starting from measured joint state.",
+    arm_name.c_str(), reason.c_str());
+}
+
+Eigen::VectorXd AIWorkerMoveJController::computeArmDesiredJointVelocity(
+  const Eigen::VectorXd & q_feedback,
+  const Eigen::VectorXd & q_reference,
+  const Eigen::VectorXd & qdot_reference,
+  const std::vector<std::string> & arm_joint_names,
+  bool slow_start_active,
+  bool & slow_start_reached) const
+{
+  Eigen::VectorXd desired_joint_vel = Eigen::VectorXd::Zero(q_feedback.size());
+  slow_start_reached = true;
+
+  for (const auto & joint_name : arm_joint_names) {
+    const auto it = model_joint_index_map_.find(joint_name);
+    if (it == model_joint_index_map_.end()) {
+      continue;
+    }
+
+    const int idx = it->second;
+    if (idx < 0 || idx >= q_feedback.size() || idx >= q_reference.size()) {
+      continue;
+    }
+
+    const double error = q_reference[idx] - q_feedback[idx];
+    const double abs_error = std::abs(error);
+    if (abs_error > slow_start_joint_threshold_) {
+      slow_start_reached = false;
+    }
+
+    if (slow_start_active) {
+      if (abs_error <= slow_start_joint_threshold_) {
+        desired_joint_vel[idx] = 0.0;
+      } else {
+        const double step_limited_velocity =
+          time_step_ > 1e-9 ? abs_error / time_step_ : std::abs(slow_start_joint_velocity_);
+        desired_joint_vel[idx] = std::copysign(
+          std::min(std::abs(slow_start_joint_velocity_), step_limited_velocity), error);
+      }
+    } else {
+      const double feedforward = idx < qdot_reference.size() ? qdot_reference[idx] : 0.0;
+      desired_joint_vel[idx] = feedforward + kp_joint_ * error;
+    }
+  }
+
+  return desired_joint_vel;
+}
+
+void AIWorkerMoveJController::updateArmTimedReference(
+  const std::vector<std::string> & arm_joint_names,
+  const Eigen::VectorXd & arm_start,
+  const Eigen::VectorXd & arm_goal,
+  const rclcpp::Time & start_time,
+  double duration,
+  bool & timed_motion_active,
+  Eigen::VectorXd & q_reference,
+  Eigen::VectorXd & qdot_reference) const
+{
+  if (!timed_motion_active || duration <= 1e-9) {
+    return;
+  }
+
+  const double elapsed = (this->now() - start_time).seconds();
+  const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
+
+  for (const auto & joint_name : arm_joint_names) {
+    const auto it = model_joint_index_map_.find(joint_name);
+    if (it == model_joint_index_map_.end()) {
+      continue;
+    }
+
+    const int idx = it->second;
+    if (
+      idx < 0 || idx >= q_reference.size() || idx >= qdot_reference.size() ||
+      idx >= arm_start.size() || idx >= arm_goal.size())
+    {
+      continue;
+    }
+
+    const double delta = arm_goal[idx] - arm_start[idx];
+    q_reference[idx] = arm_start[idx] + alpha * delta;
+    qdot_reference[idx] = alpha < 1.0 ? delta / duration : 0.0;
+  }
+
+  if (alpha >= 1.0) {
+    timed_motion_active = false;
   }
 }
 
@@ -371,21 +549,51 @@ void AIWorkerMoveJController::controlLoopCallback()
   }
 
   try {
+    updateSlowStartWatchdogs();
+
     const Eigen::VectorXd q_feedback = q_commanded_;
     kinematics_solver_->updateState(q_feedback, qdot_);
 
-    Eigen::VectorXd q_ref = q_feedback;
-    Eigen::VectorXd qdot_ref = Eigen::VectorXd::Zero(q_feedback.size());
+    Eigen::VectorXd desired_joint_vel = Eigen::VectorXd::Zero(q_feedback.size());
 
     if (right_movej_target_initialized_) {
-      assignArmSegment(right_movej_goal_, right_arm_joints_, q_ref);
+      Eigen::VectorXd right_reference = right_movej_goal_;
+      Eigen::VectorXd right_reference_velocity = Eigen::VectorXd::Zero(q_feedback.size());
+      updateArmTimedReference(
+        right_arm_joints_, right_movej_start_, right_movej_goal_, right_movej_start_time_,
+        right_movej_duration_, right_timed_motion_active_, right_reference,
+        right_reference_velocity);
+      bool right_slow_start_reached = false;
+      desired_joint_vel += computeArmDesiredJointVelocity(
+        q_feedback, right_reference, right_reference_velocity, right_arm_joints_,
+        right_slow_start_active_, right_slow_start_reached);
+      if (right_slow_start_active_ && right_slow_start_reached) {
+        right_slow_start_active_ = false;
+        right_zero_duration_watchdog_active_ = true;
+        right_zero_duration_missed_loops_ = 0;
+        RCLCPP_WARN(this->get_logger(), "Right joint slow-start complete. Switching to tracking.");
+      }
     }
 
     if (left_movej_target_initialized_) {
-      assignArmSegment(left_movej_goal_, left_arm_joints_, q_ref);
+      Eigen::VectorXd left_reference = left_movej_goal_;
+      Eigen::VectorXd left_reference_velocity = Eigen::VectorXd::Zero(q_feedback.size());
+      updateArmTimedReference(
+        left_arm_joints_, left_movej_start_, left_movej_goal_, left_movej_start_time_,
+        left_movej_duration_, left_timed_motion_active_, left_reference,
+        left_reference_velocity);
+      bool left_slow_start_reached = false;
+      desired_joint_vel += computeArmDesiredJointVelocity(
+        q_feedback, left_reference, left_reference_velocity, left_arm_joints_,
+        left_slow_start_active_, left_slow_start_reached);
+      if (left_slow_start_active_ && left_slow_start_reached) {
+        left_slow_start_active_ = false;
+        left_zero_duration_watchdog_active_ = true;
+        left_zero_duration_missed_loops_ = 0;
+        RCLCPP_WARN(this->get_logger(), "Left joint slow-start complete. Switching to tracking.");
+      }
     }
 
-    const Eigen::VectorXd desired_joint_vel = qdot_ref + kp_joint_ * (q_ref - q_feedback);
     const Eigen::VectorXd joint_weight =
       Eigen::VectorXd::Ones(kinematics_solver_->getDof()) * weight_tracking_;
     const Eigen::VectorXd damping_weight =
@@ -422,6 +630,16 @@ void AIWorkerMoveJController::syncCommandStateToFeedback()
   right_movej_goal_ = q_;
   left_movej_start_ = q_;
   left_movej_goal_ = q_;
+  right_zero_duration_missed_loops_ = 0;
+  left_zero_duration_missed_loops_ = 0;
+  right_zero_duration_watchdog_active_ = false;
+  left_zero_duration_watchdog_active_ = false;
+  right_slow_start_active_ = false;
+  left_slow_start_active_ = false;
+  right_timed_motion_active_ = false;
+  left_timed_motion_active_ = false;
+  right_movej_duration_ = 0.0;
+  left_movej_duration_ = 0.0;
 }
 
 void AIWorkerMoveJController::syncRightArmToFeedback()

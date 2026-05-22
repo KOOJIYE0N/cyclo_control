@@ -49,6 +49,9 @@ ai_worker_movej_controller:
     cbf_alpha: 50.0
 
     command_timeout: 0.1
+    slow_start_joint_velocity: 0.3
+    slow_start_joint_threshold: 0.01
+    command_watchdog_loops: 5
 
     joint_states_topic: "/joint_states"
     right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/raw_joint_trajectory"
