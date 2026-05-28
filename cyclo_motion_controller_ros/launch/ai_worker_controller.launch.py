@@ -242,6 +242,7 @@ def generate_launch_description():
             config_file,
             {
                 'urdf_path': leader_urdf_path,
+                'base_frame': base_frame,
                 'reactivate_topic': reactivate_topic,
             },
         ],

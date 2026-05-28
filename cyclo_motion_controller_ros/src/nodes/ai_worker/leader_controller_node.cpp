@@ -51,7 +51,7 @@ LeaderController::LeaderController()
   l_goal_pose_topic_ = this->declare_parameter("l_goal_pose_topic", std::string("/l_goal_pose"));
   r_elbow_pose_topic_ = this->declare_parameter("r_elbow_pose_topic", std::string("/r_elbow_pose"));
   l_elbow_pose_topic_ = this->declare_parameter("l_elbow_pose_topic", std::string("/l_elbow_pose"));
-  base_frame_id_ = this->declare_parameter("base_frame_id", std::string("base_link"));
+  base_frame_id_ = this->declare_parameter("base_frame", std::string("base_link"));
   r_gripper_name_ = this->declare_parameter("r_gripper_name", std::string("arm_r_link7"));
   l_gripper_name_ = this->declare_parameter("l_gripper_name", std::string("arm_l_link7"));
   r_elbow_name_ = this->declare_parameter("r_elbow_name", std::string("arm_r_link4"));
