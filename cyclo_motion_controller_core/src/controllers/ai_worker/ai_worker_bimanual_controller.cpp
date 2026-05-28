@@ -281,9 +281,10 @@ void AIWorkerBimanualController::setEqConstraint()
   }
 
   const Eigen::Affine3d desired_left_pose = right_pose * rigid_right_to_left_in_right_;
+  const double dt = std::max(dt_, 1e-6);
+
   const Eigen::Vector3d position_error = left_pose.translation() - desired_left_pose.translation();
-  b_eq_ds_.segment<3>(si_index_.eq_grasp_start) =
-    -rigid_grasp_position_recovery_gain_ * position_error;
+  b_eq_ds_.segment<3>(si_index_.eq_grasp_start) = -position_error / dt;
 
   const Eigen::Matrix3d rotation_error =
     desired_left_pose.linear() * left_pose.linear().transpose();
@@ -292,8 +293,7 @@ void AIWorkerBimanualController::setEqConstraint()
   if (std::isfinite(angle_axis_error.angle()) && angle_axis_error.angle() > 1e-9) {
     orientation_error = angle_axis_error.axis() * angle_axis_error.angle();
   }
-  b_eq_ds_.segment<3>(si_index_.eq_grasp_start + 3) =
-    rigid_grasp_orientation_recovery_gain_ * orientation_error;
+  b_eq_ds_.segment<3>(si_index_.eq_grasp_start + 3) = orientation_error / dt;
 }
 
 }  // namespace controllers
