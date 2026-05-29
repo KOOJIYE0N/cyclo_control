@@ -6,7 +6,6 @@ ai_worker_movel_controller:
 
     kp_position: 50.0
     kp_orientation: 50.0
-
     weight_position: 10.0
     weight_orientation: 1.0
     weight_damping: 0.1
@@ -64,7 +63,6 @@ ai_worker_bimanual_movel_controller:
 
     kp_position: 50.0
     kp_orientation: 50.0
-
     weight_position: 10.0
     weight_orientation: 1.0
     weight_damping: 0.1
@@ -98,8 +96,10 @@ ai_worker_bimanual_movej_controller:
     time_step: 0.01
     trajectory_time: 0.0
 
-    kp_grasp_position: 10.0
-    kp_grasp_orientation: 10.0
+    kp_joint: 50.0
+    weight_tracking: 10.0
+    kp_grasp_position: 50.0
+    kp_grasp_orientation: 50.0
     weight_position: 10.0
     weight_orientation: 1.0
     weight_damping: 0.1
@@ -121,6 +121,8 @@ ai_worker_bimanual_movej_controller:
     r_gripper_name: "arm_r_link7"
     l_gripper_name: "arm_l_link7"
     grasp_blend_ratio: 0.5
+    gripper_grasp_threshold: 0.85
+    gripper_grasp_hold_time: 2.0
 
 vr_controller:
   ros__parameters:

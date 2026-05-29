@@ -1,8 +1,7 @@
-#include "controllers/ai_worker/ai_worker_bimanual_controller.hpp"
+#include "controllers/ai_worker/ai_worker_bimanual_movel_controller.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <Eigen/Geometry>
 
 namespace cyclo_motion_controller
 {
@@ -23,7 +22,7 @@ Eigen::Matrix3d skew(const Eigen::Vector3d & v)
 }
 }  // namespace
 
-AIWorkerBimanualController::AIWorkerBimanualController(
+AIWorkerBimanualMoveLController::AIWorkerBimanualMoveLController(
   std::shared_ptr<cyclo_motion_controller::kinematics::KinematicsSolver> robot_data,
   const double dt)
 : cyclo_motion_controller::optimization::QPBase(), robot_data_(robot_data), dt_(dt)
@@ -52,7 +51,6 @@ AIWorkerBimanualController::AIWorkerBimanualController(
     si_index_.con_sing_size +
     si_index_.con_sel_col_size;
   const int neq = si_index_.eq_grasp_size;
-
   QPBase::setQPsize(nx, nbound, nineq, neq);
 
   si_index_.qdot_start = 0;
@@ -73,24 +71,13 @@ AIWorkerBimanualController::AIWorkerBimanualController(
   collision_safe_distance_ = 0.02;
 }
 
-void AIWorkerBimanualController::setDesiredTaskVel(
+void AIWorkerBimanualMoveLController::setDesiredTaskVel(
   const std::map<std::string, cyclo_motion_controller::common::Vector6d> & link_xdot_desired)
 {
   link_xdot_desired_ = link_xdot_desired;
 }
 
-bool AIWorkerBimanualController::getOptJointVel(Eigen::VectorXd & opt_qdot)
-{
-  Eigen::MatrixXd sol;
-  if (!solveQP(sol)) {
-    opt_qdot.setZero();
-    return false;
-  }
-  opt_qdot = sol.block(si_index_.qdot_start, 0, si_index_.qdot_size, 1);
-  return true;
-}
-
-void AIWorkerBimanualController::setWeight(
+void AIWorkerBimanualMoveLController::setWeight(
   const std::map<std::string, cyclo_motion_controller::common::Vector6d> & link_w_tracking,
   const Eigen::VectorXd & w_damping)
 {
@@ -100,7 +87,7 @@ void AIWorkerBimanualController::setWeight(
   }
 }
 
-void AIWorkerBimanualController::setControllerParams(
+void AIWorkerBimanualMoveLController::setControllerParams(
   const double slack_penalty, const double cbf_alpha,
   const double buffer_distance, const double safe_distance)
 {
@@ -110,31 +97,7 @@ void AIWorkerBimanualController::setControllerParams(
   collision_safe_distance_ = safe_distance;
 }
 
-void AIWorkerBimanualController::setRigidGraspConstraint(
-  const bool active,
-  const Eigen::Vector3d & right_to_left_world)
-{
-  rigid_grasp_active_ = active;
-  rigid_right_to_left_world_ = right_to_left_world;
-  rigid_grasp_use_relative_transform_ = false;
-  rigid_grasp_position_recovery_gain_ = 0.0;
-  rigid_grasp_orientation_recovery_gain_ = 0.0;
-}
-
-void AIWorkerBimanualController::setRigidGraspConstraint(
-  const bool active,
-  const Eigen::Affine3d & right_to_left_in_right,
-  const double position_recovery_gain,
-  const double orientation_recovery_gain)
-{
-  rigid_grasp_active_ = active;
-  rigid_grasp_use_relative_transform_ = true;
-  rigid_right_to_left_in_right_ = right_to_left_in_right;
-  rigid_grasp_position_recovery_gain_ = std::max(0.0, position_recovery_gain);
-  rigid_grasp_orientation_recovery_gain_ = std::max(0.0, orientation_recovery_gain);
-}
-
-void AIWorkerBimanualController::setConstraintLinks(
+void AIWorkerBimanualMoveLController::setConstraintLinks(
   const std::string & right_link, const std::string & left_link)
 {
   if (!right_link.empty()) {
@@ -145,26 +108,44 @@ void AIWorkerBimanualController::setConstraintLinks(
   }
 }
 
-void AIWorkerBimanualController::setCost()
+void AIWorkerBimanualMoveLController::setRigidGraspPoseConstraint(
+  const bool active, const Eigen::Affine3d & right_to_left_in_right)
+{
+  rigid_grasp_active_ = active;
+  rigid_right_to_left_in_right_ = right_to_left_in_right;
+}
+
+bool AIWorkerBimanualMoveLController::getOptJointVel(Eigen::VectorXd & opt_qdot)
+{
+  Eigen::MatrixXd sol;
+  if (!solveQP(sol)) {
+    opt_qdot.setZero();
+    return false;
+  }
+  opt_qdot = sol.block(si_index_.qdot_start, 0, si_index_.qdot_size, 1);
+  return true;
+}
+
+void AIWorkerBimanualMoveLController::setCost()
 {
   P_ds_.setZero(nx_, nx_);
   q_ds_.setZero(nx_);
 
   for (const auto & [link_name, xdot_desired] : link_xdot_desired_) {
-    Eigen::MatrixXd J_i = robot_data_->getJacobian(link_name);
+    Eigen::MatrixXd jacobian = robot_data_->getJacobian(link_name);
     cyclo_motion_controller::common::Vector6d w_tracking =
       cyclo_motion_controller::common::Vector6d::Ones();
 
-    auto iter = link_w_tracking_.find(link_name);
+    const auto iter = link_w_tracking_.find(link_name);
     if (iter != link_w_tracking_.end()) {
       w_tracking = iter->second;
     }
 
     P_ds_.block(
       si_index_.qdot_start, si_index_.qdot_start, si_index_.qdot_size,
-      si_index_.qdot_size) += 2.0 * J_i.transpose() * w_tracking.asDiagonal() * J_i;
+      si_index_.qdot_size) += 2.0 * jacobian.transpose() * w_tracking.asDiagonal() * jacobian;
     q_ds_.segment(si_index_.qdot_start, si_index_.qdot_size) +=
-      -2.0 * J_i.transpose() * w_tracking.asDiagonal() * xdot_desired;
+      -2.0 * jacobian.transpose() * w_tracking.asDiagonal() * xdot_desired;
   }
 
   P_ds_.block(
@@ -182,16 +163,14 @@ void AIWorkerBimanualController::setCost()
   }
 }
 
-void AIWorkerBimanualController::setBoundConstraint()
+void AIWorkerBimanualMoveLController::setBoundConstraint()
 {
   l_bound_ds_.setConstant(nbc_, -OSQP_INFTY);
   u_bound_ds_.setConstant(nbc_, OSQP_INFTY);
-
   l_bound_ds_.segment(si_index_.qdot_start, si_index_.qdot_size) =
     robot_data_->getJointVelocityLimit().first;
   u_bound_ds_.segment(si_index_.qdot_start, si_index_.qdot_size) =
     robot_data_->getJointVelocityLimit().second;
-
   l_bound_ds_.segment(si_index_.slack_q_min_start, si_index_.slack_q_min_size).setZero();
   l_bound_ds_.segment(si_index_.slack_q_max_start, si_index_.slack_q_max_size).setZero();
   l_bound_ds_(si_index_.slack_sing_start) = 0.0;
@@ -200,7 +179,7 @@ void AIWorkerBimanualController::setBoundConstraint()
   }
 }
 
-void AIWorkerBimanualController::setIneqConstraint()
+void AIWorkerBimanualMoveLController::setIneqConstraint()
 {
   A_ineq_ds_.setZero(nineqc_, nx_);
   l_ineq_ds_.setConstant(nineqc_, -OSQP_INFTY);
@@ -210,23 +189,19 @@ void AIWorkerBimanualController::setIneqConstraint()
   const Eigen::VectorXd q_max = robot_data_->getJointPositionLimit().second;
   const Eigen::VectorXd q = robot_data_->getJointPosition();
 
-  A_ineq_ds_.block(
-    si_index_.con_q_min_start, si_index_.qdot_start,
+  A_ineq_ds_.block(si_index_.con_q_min_start, si_index_.qdot_start,
     si_index_.con_q_min_size, si_index_.qdot_size) =
     Eigen::MatrixXd::Identity(si_index_.con_q_min_size, si_index_.qdot_size);
-  A_ineq_ds_.block(
-    si_index_.con_q_min_start, si_index_.slack_q_min_start,
+  A_ineq_ds_.block(si_index_.con_q_min_start, si_index_.slack_q_min_start,
     si_index_.con_q_min_size, si_index_.slack_q_min_size) =
     Eigen::MatrixXd::Identity(si_index_.con_q_min_size, si_index_.slack_q_min_size);
   l_ineq_ds_.segment(si_index_.con_q_min_start, si_index_.con_q_min_size) =
     -cbf_alpha_ * (q - q_min);
 
-  A_ineq_ds_.block(
-    si_index_.con_q_max_start, si_index_.qdot_start,
+  A_ineq_ds_.block(si_index_.con_q_max_start, si_index_.qdot_start,
     si_index_.con_q_max_size, si_index_.qdot_size) =
     -Eigen::MatrixXd::Identity(si_index_.con_q_max_size, si_index_.qdot_size);
-  A_ineq_ds_.block(
-    si_index_.con_q_max_start, si_index_.slack_q_max_start,
+  A_ineq_ds_.block(si_index_.con_q_max_start, si_index_.slack_q_max_start,
     si_index_.con_q_max_size, si_index_.slack_q_max_size) =
     Eigen::MatrixXd::Identity(si_index_.con_q_max_size, si_index_.slack_q_max_size);
   l_ineq_ds_.segment(si_index_.con_q_max_start, si_index_.con_q_max_size) =
@@ -238,8 +213,7 @@ void AIWorkerBimanualController::setIneqConstraint()
     for (int i = 0; i < pair_count; ++i) {
       const auto & res = pair_results[i];
       A_ineq_ds_.block(si_index_.con_sel_col_start + i, si_index_.qdot_start, 1,
-            si_index_.qdot_size) =
-        res.grad.transpose();
+            si_index_.qdot_size) = res.grad.transpose();
       if (si_index_.slack_sel_col_size > 0 && i < si_index_.slack_sel_col_size) {
         A_ineq_ds_(si_index_.con_sel_col_start + i, si_index_.slack_sel_col_start + i) = 1.0;
       }
@@ -251,11 +225,10 @@ void AIWorkerBimanualController::setIneqConstraint()
   }
 }
 
-void AIWorkerBimanualController::setEqConstraint()
+void AIWorkerBimanualMoveLController::setEqConstraint()
 {
   A_eq_ds_.setZero(neqc_, nx_);
   b_eq_ds_.setZero(neqc_);
-
   if (!rigid_grasp_active_ || neqc_ < 6) {
     return;
   }
@@ -264,25 +237,16 @@ void AIWorkerBimanualController::setEqConstraint()
   const Eigen::MatrixXd jl = robot_data_->getJacobian(left_constraint_link_);
   const Eigen::Affine3d right_pose = robot_data_->getPose(right_constraint_link_);
   const Eigen::Affine3d left_pose = robot_data_->getPose(left_constraint_link_);
-  const Eigen::Vector3d right_to_left_world = rigid_grasp_use_relative_transform_
-    ? right_pose.linear() * rigid_right_to_left_in_right_.translation()
-    : rigid_right_to_left_world_;
+  const Eigen::Vector3d right_to_left_world =
+    right_pose.linear() * rigid_right_to_left_in_right_.translation();
 
-  Eigen::Matrix<double, 6, 6> e = Eigen::Matrix<double, 6, 6>::Identity();
-  e.block<3, 3>(0, 3) = -skew(right_to_left_world);
-  const Eigen::MatrixXd manifold_jacobian = jl - e * jr;
-
-  A_eq_ds_.block(
-    si_index_.eq_grasp_start, si_index_.qdot_start,
-    si_index_.eq_grasp_size, si_index_.qdot_size) = manifold_jacobian;
-
-  if (!rigid_grasp_use_relative_transform_) {
-    return;
-  }
+  Eigen::Matrix<double, 6, 6> transform = Eigen::Matrix<double, 6, 6>::Identity();
+  transform.block<3, 3>(0, 3) = -skew(right_to_left_world);
+  A_eq_ds_.block(si_index_.eq_grasp_start, si_index_.qdot_start,
+    si_index_.eq_grasp_size, si_index_.qdot_size) = jl - transform * jr;
 
   const Eigen::Affine3d desired_left_pose = right_pose * rigid_right_to_left_in_right_;
   const double dt = std::max(dt_, 1e-6);
-
   const Eigen::Vector3d position_error = left_pose.translation() - desired_left_pose.translation();
   b_eq_ds_.segment<3>(si_index_.eq_grasp_start) = -position_error / dt;
 
@@ -295,6 +259,5 @@ void AIWorkerBimanualController::setEqConstraint()
   }
   b_eq_ds_.segment<3>(si_index_.eq_grasp_start + 3) = orientation_error / dt;
 }
-
 }  // namespace controllers
 }  // namespace cyclo_motion_controller

@@ -83,7 +83,7 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   try {
     kinematics_solver_ = std::make_shared<cyclo_motion_controller::kinematics::KinematicsSolver>(
       urdf_path_, srdf_path_);
-    qp_controller_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualController>(
+    qp_controller_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveLController>(
       kinematics_solver_, time_step_);
     qp_controller_->setControllerParams(
       slack_penalty_, cbf_alpha_, collision_buffer_, collision_safe_distance_);
@@ -224,7 +224,7 @@ void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::m
 
   if (!msg->data) {
     grasp_constraint_active_ = false;
-    qp_controller_->setRigidGraspConstraint(false, Eigen::Vector3d::Zero());
+    qp_controller_->setRigidGraspPoseConstraint(false, Eigen::Affine3d::Identity());
     if (joint_state_received_) {
       Eigen::VectorXd q_feedback = q_desired_initialized_ ? q_desired_ : q_;
       if (lift_joint_index_ >= 0 && lift_joint_index_ < q_feedback.size()) {
@@ -423,14 +423,11 @@ void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
     if (grasp_constraint_active_) {
       const Eigen::Affine3d right_to_left_transform =
         grasp_object_to_right_.inverse() * grasp_object_to_left_;
-      // Add recovery dynamics so captured grasp relation converges back if it was disturbed.
-      qp_controller_->setRigidGraspConstraint(
+      qp_controller_->setRigidGraspPoseConstraint(
         true,
-        right_to_left_transform,
-        rigid_grasp_position_recovery_gain_,
-        rigid_grasp_orientation_recovery_gain_);
+        right_to_left_transform);
     } else {
-      qp_controller_->setRigidGraspConstraint(false, Eigen::Vector3d::Zero());
+      qp_controller_->setRigidGraspPoseConstraint(false, Eigen::Affine3d::Identity());
     }
 
     const Eigen::VectorXd damping =

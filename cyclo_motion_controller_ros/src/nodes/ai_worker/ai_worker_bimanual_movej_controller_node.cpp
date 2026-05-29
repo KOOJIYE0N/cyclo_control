@@ -17,6 +17,8 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
   control_frequency_ = this->declare_parameter("control_frequency", 100.0);
   time_step_ = this->declare_parameter("time_step", 0.01);
   trajectory_time_ = this->declare_parameter("trajectory_time", 0.0);
+  kp_joint_ = this->declare_parameter("kp_joint", 6.0);
+  weight_tracking_ = this->declare_parameter("weight_tracking", 1.0);
   kp_grasp_position_ = this->declare_parameter("kp_grasp_position", 10.0);
   kp_grasp_orientation_ = this->declare_parameter("kp_grasp_orientation", 10.0);
   weight_position_ = this->declare_parameter("weight_position", 10.0);
@@ -31,6 +33,8 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
   rigid_grasp_orientation_recovery_gain_ =
     this->declare_parameter("rigid_grasp_orientation_recovery_gain", 10.0);
   joint_state_timeout_ = this->declare_parameter("joint_state_timeout", 0.5);
+  gripper_grasp_threshold_ = this->declare_parameter("gripper_grasp_threshold", 0.85);
+  gripper_grasp_hold_time_ = this->declare_parameter("gripper_grasp_hold_time", 2.0);
   urdf_path_ = this->declare_parameter("urdf_path", std::string(""));
   srdf_path_ = this->declare_parameter("srdf_path", std::string(""));
   joint_states_topic_ = this->declare_parameter("joint_states_topic", std::string("/joint_states"));
@@ -81,7 +85,7 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
   try {
     kinematics_solver_ =
       std::make_shared<cyclo_motion_controller::kinematics::KinematicsSolver>(urdf_path_, srdf_path_);
-    qp_filter_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualController>(
+    qp_filter_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveJController>(
       kinematics_solver_, time_step_);
     qp_filter_->setControllerParams(
       slack_penalty_, cbf_alpha_, collision_buffer_, collision_safe_distance_);
@@ -138,6 +142,17 @@ void AIWorkerBimanualMoveJController::extractJointStates(
   q_.setZero(dof);
   qdot_.setZero(dof);
 
+  for (size_t i = 0; i < msg->name.size(); ++i) {
+    if (msg->name[i] == right_gripper_joint_name_ && i < msg->position.size()) {
+      right_gripper_joint_state_position_ = msg->position[i];
+      right_gripper_joint_state_received_ = true;
+    }
+    if (msg->name[i] == left_gripper_joint_name_ && i < msg->position.size()) {
+      left_gripper_joint_state_position_ = msg->position[i];
+      left_gripper_joint_state_received_ = true;
+    }
+  }
+
   const int max_index = std::min<int>(dof, static_cast<int>(model_joint_names_.size()));
   for (int i = 0; i < max_index; ++i) {
     const auto & joint_name = model_joint_names_[i];
@@ -168,6 +183,7 @@ void AIWorkerBimanualMoveJController::jointStateCallback(
   last_joint_state_time_ = this->now();
   joint_state_received_ = true;
   joint_state_timeout_active_ = false;
+  updateGripperTriggeredGraspMode();
 
   if (!commanded_state_initialized_) {
     syncCommandStateToFeedback();
@@ -286,11 +302,64 @@ void AIWorkerBimanualMoveJController::graspCaptureCallback(const std_msgs::msg::
     return;
   }
   if (!msg->data) {
-    grasp_constraint_active_ = false;
-    qp_filter_->setRigidGraspConstraint(false, Eigen::Vector3d::Zero());
+    disableGraspConstraint();
     return;
   }
+  enableGraspConstraint();
+}
+
+void AIWorkerBimanualMoveJController::updateGripperTriggeredGraspMode()
+{
+  if (!right_gripper_joint_state_received_ || !left_gripper_joint_state_received_) {
+    return;
+  }
+
+  const rclcpp::Time now = this->now();
+  const bool both_closed =
+    right_gripper_joint_state_position_ > gripper_grasp_threshold_ &&
+    left_gripper_joint_state_position_ > gripper_grasp_threshold_;
+  const bool both_open =
+    right_gripper_joint_state_position_ < gripper_grasp_threshold_ &&
+    left_gripper_joint_state_position_ < gripper_grasp_threshold_;
+
+  if (!grasp_constraint_active_ && both_closed) {
+    if (!gripper_closed_timer_active_) {
+      gripper_closed_since_ = now;
+      gripper_closed_timer_active_ = true;
+    } else if ((now - gripper_closed_since_).seconds() >= gripper_grasp_hold_time_) {
+      enableGraspConstraint();
+      gripper_closed_timer_active_ = false;
+    }
+  } else {
+    gripper_closed_timer_active_ = false;
+  }
+
+  if (grasp_constraint_active_ && both_open) {
+    if (!gripper_open_timer_active_) {
+      gripper_open_since_ = now;
+      gripper_open_timer_active_ = true;
+    } else if ((now - gripper_open_since_).seconds() >= gripper_grasp_hold_time_) {
+      disableGraspConstraint();
+      gripper_open_timer_active_ = false;
+    }
+  } else {
+    gripper_open_timer_active_ = false;
+  }
+}
+
+void AIWorkerBimanualMoveJController::enableGraspConstraint()
+{
   captureCurrentGraspConstraint();
+}
+
+void AIWorkerBimanualMoveJController::disableGraspConstraint()
+{
+  grasp_constraint_active_ = false;
+  gripper_closed_timer_active_ = false;
+  gripper_open_timer_active_ = false;
+  if (qp_filter_) {
+    qp_filter_->setRigidGraspPoseConstraint(false, Eigen::Affine3d::Identity());
+  }
 }
 
 cyclo_motion_controller::common::Vector6d AIWorkerBimanualMoveJController::computeDesiredTaskVelocity(
@@ -377,8 +446,6 @@ void AIWorkerBimanualMoveJController::controlLoopCallback()
   try {
     const Eigen::VectorXd q_feedback = q_commanded_;
     kinematics_solver_->updateState(q_feedback, qdot_);
-    const Eigen::Affine3d right_current_pose = kinematics_solver_->getPose(r_gripper_name_);
-    const Eigen::Affine3d left_current_pose = kinematics_solver_->getPose(l_gripper_name_);
 
     Eigen::VectorXd q_ref = q_feedback;
     if (right_movej_target_initialized_) {
@@ -388,43 +455,22 @@ void AIWorkerBimanualMoveJController::controlLoopCallback()
       assignArmSegment(left_movej_goal_, left_arm_joints_, q_ref);
     }
 
-    Eigen::Affine3d right_goal_pose = kinematics_solver_->computePose(q_ref, r_gripper_name_);
-    Eigen::Affine3d left_goal_pose = kinematics_solver_->computePose(q_ref, l_gripper_name_);
-    applyBimanualGoalProjection(right_goal_pose, left_goal_pose);
-
-    std::map<std::string, cyclo_motion_controller::common::Vector6d> desired_task_velocities;
-    desired_task_velocities[r_gripper_name_] =
-      computeDesiredTaskVelocity(right_current_pose, right_goal_pose);
-    desired_task_velocities[l_gripper_name_] =
-      computeDesiredTaskVelocity(left_current_pose, left_goal_pose);
-
-    std::map<std::string, cyclo_motion_controller::common::Vector6d> weights;
-    cyclo_motion_controller::common::Vector6d right_weight =
-      cyclo_motion_controller::common::Vector6d::Ones();
-    cyclo_motion_controller::common::Vector6d left_weight =
-      cyclo_motion_controller::common::Vector6d::Ones();
-    right_weight.head<3>().setConstant(weight_position_);
-    right_weight.tail<3>().setConstant(weight_orientation_);
-    left_weight.head<3>().setConstant(weight_position_);
-    left_weight.tail<3>().setConstant(weight_orientation_);
-    weights[r_gripper_name_] = right_weight;
-    weights[l_gripper_name_] = left_weight;
+    const Eigen::VectorXd desired_joint_vel = kp_joint_ * (q_ref - q_feedback);
+    const Eigen::VectorXd joint_weight =
+      Eigen::VectorXd::Ones(kinematics_solver_->getDof()) * weight_tracking_;
     const Eigen::VectorXd damping =
       Eigen::VectorXd::Ones(kinematics_solver_->getDof()) * weight_damping_;
 
     if (grasp_constraint_active_) {
-      // Add recovery dynamics so captured grasp relation converges back if it was disturbed.
-      qp_filter_->setRigidGraspConstraint(
+      qp_filter_->setRigidGraspPoseConstraint(
         true,
-        grasp_right_to_left_,
-        rigid_grasp_position_recovery_gain_,
-        rigid_grasp_orientation_recovery_gain_);
+        grasp_right_to_left_);
     } else {
-      qp_filter_->setRigidGraspConstraint(false, Eigen::Vector3d::Zero());
+      qp_filter_->setRigidGraspPoseConstraint(false, Eigen::Affine3d::Identity());
     }
 
-    qp_filter_->setWeight(weights, damping);
-    qp_filter_->setDesiredTaskVel(desired_task_velocities);
+    qp_filter_->setDesiredJointVel(desired_joint_vel);
+    qp_filter_->setWeight(joint_weight, damping);
 
     Eigen::VectorXd optimal_velocities;
     if (!qp_filter_->getOptJointVel(optimal_velocities)) {

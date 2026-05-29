@@ -15,7 +15,7 @@
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 
 #include "common/type_define.hpp"
-#include "controllers/ai_worker/ai_worker_bimanual_controller.hpp"
+#include "controllers/ai_worker/ai_worker_bimanual_movej_controller.hpp"
 #include "kinematics/kinematics_solver.hpp"
 
 namespace cyclo_motion_controller_ros
@@ -40,6 +40,9 @@ private:
   void leftTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
   void graspCaptureCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void controlLoopCallback();
+  void updateGripperTriggeredGraspMode();
+  void enableGraspConstraint();
+  void disableGraspConstraint();
 
   bool updateArmTargetFromTrajectory(
     const trajectory_msgs::msg::JointTrajectory & msg,
@@ -74,6 +77,8 @@ private:
   double control_frequency_;
   double time_step_;
   double trajectory_time_;
+  double kp_joint_;
+  double weight_tracking_;
   double kp_grasp_position_;
   double kp_grasp_orientation_;
   double weight_position_;
@@ -86,6 +91,8 @@ private:
   double rigid_grasp_position_recovery_gain_;
   double rigid_grasp_orientation_recovery_gain_;
   double joint_state_timeout_;
+  double gripper_grasp_threshold_;
+  double gripper_grasp_hold_time_;
   std::string joint_states_topic_;
   std::string right_traj_topic_;
   std::string left_traj_topic_;
@@ -111,7 +118,8 @@ private:
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   std::shared_ptr<cyclo_motion_controller::kinematics::KinematicsSolver> kinematics_solver_;
-  std::shared_ptr<cyclo_motion_controller::controllers::AIWorkerBimanualController> qp_filter_;
+  std::shared_ptr<cyclo_motion_controller::controllers::AIWorkerBimanualMoveJController>
+  qp_filter_;
 
   Eigen::VectorXd q_;
   Eigen::VectorXd qdot_;
@@ -126,10 +134,18 @@ private:
   bool left_movej_target_initialized_;
   bool joint_state_timeout_active_ = false;
   bool grasp_constraint_active_ = false;
+  bool right_gripper_joint_state_received_ = false;
+  bool left_gripper_joint_state_received_ = false;
+  bool gripper_closed_timer_active_ = false;
+  bool gripper_open_timer_active_ = false;
 
   double right_gripper_position_;
   double left_gripper_position_;
+  double right_gripper_joint_state_position_ = 0.0;
+  double left_gripper_joint_state_position_ = 0.0;
   rclcpp::Time last_joint_state_time_;
+  rclcpp::Time gripper_closed_since_;
+  rclcpp::Time gripper_open_since_;
   Eigen::Affine3d grasp_right_to_left_ = Eigen::Affine3d::Identity();
 
   std::vector<std::string> left_arm_joints_;

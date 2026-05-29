@@ -15,7 +15,7 @@
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 
 #include "common/type_define.hpp"
-#include "controllers/ai_worker/ai_worker_bimanual_controller.hpp"
+#include "controllers/ai_worker/ai_worker_bimanual_movel_controller.hpp"
 #include "kinematics/kinematics_solver.hpp"
 
 namespace cyclo_motion_controller_ros
@@ -111,7 +111,8 @@ private:
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   std::shared_ptr<cyclo_motion_controller::kinematics::KinematicsSolver> kinematics_solver_;
-  std::shared_ptr<cyclo_motion_controller::controllers::AIWorkerBimanualController> qp_controller_;
+  std::shared_ptr<cyclo_motion_controller::controllers::AIWorkerBimanualMoveLController>
+  qp_controller_;
 
   Eigen::VectorXd q_;
   Eigen::VectorXd qdot_;
