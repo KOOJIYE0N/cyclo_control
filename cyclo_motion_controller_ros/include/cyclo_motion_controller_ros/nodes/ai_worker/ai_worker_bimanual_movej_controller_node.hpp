@@ -134,6 +134,7 @@ private:
   bool left_movej_target_initialized_;
   bool joint_state_timeout_active_ = false;
   bool grasp_constraint_active_ = false;
+  bool manual_grasp_latch_ = false;
   bool right_gripper_joint_state_received_ = false;
   bool left_gripper_joint_state_received_ = false;
   bool gripper_closed_timer_active_ = false;

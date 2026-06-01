@@ -302,9 +302,11 @@ void AIWorkerBimanualMoveJController::graspCaptureCallback(const std_msgs::msg::
     return;
   }
   if (!msg->data) {
+    manual_grasp_latch_ = false;
     disableGraspConstraint();
     return;
   }
+  manual_grasp_latch_ = true;
   enableGraspConstraint();
 }
 
@@ -314,12 +316,18 @@ void AIWorkerBimanualMoveJController::updateGripperTriggeredGraspMode()
     return;
   }
 
+  if (manual_grasp_latch_) {
+    gripper_closed_timer_active_ = false;
+    gripper_open_timer_active_ = false;
+    return;
+  }
+
   const rclcpp::Time now = this->now();
   const bool both_closed =
     right_gripper_joint_state_position_ > gripper_grasp_threshold_ &&
     left_gripper_joint_state_position_ > gripper_grasp_threshold_;
-  const bool both_open =
-    right_gripper_joint_state_position_ < gripper_grasp_threshold_ &&
+  const bool any_open =
+    right_gripper_joint_state_position_ < gripper_grasp_threshold_ ||
     left_gripper_joint_state_position_ < gripper_grasp_threshold_;
 
   if (!grasp_constraint_active_ && both_closed) {
@@ -334,7 +342,7 @@ void AIWorkerBimanualMoveJController::updateGripperTriggeredGraspMode()
     gripper_closed_timer_active_ = false;
   }
 
-  if (grasp_constraint_active_ && both_open) {
+  if (grasp_constraint_active_ && any_open) {
     if (!gripper_open_timer_active_) {
       gripper_open_since_ = now;
       gripper_open_timer_active_ = true;
