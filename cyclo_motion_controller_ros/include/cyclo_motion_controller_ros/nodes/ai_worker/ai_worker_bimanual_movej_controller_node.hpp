@@ -34,6 +34,8 @@ private:
   void syncCommandStateToFeedback();
   void syncRightArmToFeedback();
   void syncLeftArmToFeedback();
+  double maxLeaderCommandError() const;
+  void startGraspReleaseSlowStart();
 
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void rightTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
@@ -125,7 +127,9 @@ private:
   Eigen::VectorXd qdot_;
   Eigen::VectorXd q_commanded_;
 
+  Eigen::VectorXd right_movej_start_;
   Eigen::VectorXd right_movej_goal_;
+  Eigen::VectorXd left_movej_start_;
   Eigen::VectorXd left_movej_goal_;
 
   bool joint_state_received_;
@@ -139,6 +143,7 @@ private:
   bool left_gripper_joint_state_received_ = false;
   bool gripper_closed_timer_active_ = false;
   bool gripper_open_timer_active_ = false;
+  bool grasp_release_slow_start_active_ = false;
 
   double right_gripper_position_;
   double left_gripper_position_;
@@ -147,6 +152,7 @@ private:
   rclcpp::Time last_joint_state_time_;
   rclcpp::Time gripper_closed_since_;
   rclcpp::Time gripper_open_since_;
+  rclcpp::Time grasp_release_slow_start_time_;
   Eigen::Affine3d grasp_right_to_left_ = Eigen::Affine3d::Identity();
 
   std::vector<std::string> left_arm_joints_;

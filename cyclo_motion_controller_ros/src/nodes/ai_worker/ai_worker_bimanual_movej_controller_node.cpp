@@ -1,9 +1,17 @@
 #include "cyclo_motion_controller_ros/nodes/ai_worker/ai_worker_bimanual_movej_controller_node.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cyclo_motion_controller_ros
 {
+namespace
+{
+constexpr double kGraspReleaseSlowStartErrorThreshold = 0.08;
+constexpr double kGraspReleaseSlowStartJointSpeed = 0.3;
+constexpr double kGraspReleaseSlowStartMaxDuration = 6.0;
+}  // namespace
+
 AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
 : Node("ai_worker_bimanual_movej_controller"),
   joint_state_received_(false),
@@ -95,7 +103,9 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
     q_.setZero(dof);
     qdot_.setZero(dof);
     q_commanded_.setZero(dof);
+    right_movej_start_.setZero(dof);
     right_movej_goal_.setZero(dof);
+    left_movej_start_.setZero(dof);
     left_movej_goal_.setZero(dof);
     initializeJointConfig();
   } catch (const std::exception & e) {
@@ -182,14 +192,21 @@ void AIWorkerBimanualMoveJController::jointStateCallback(
   extractJointStates(msg);
   last_joint_state_time_ = this->now();
   joint_state_received_ = true;
+
+  const bool was_uninitialized = !commanded_state_initialized_;
+  const bool recovering_from_timeout = joint_state_timeout_active_;
   joint_state_timeout_active_ = false;
   updateGripperTriggeredGraspMode();
 
-  if (!commanded_state_initialized_) {
+  if (was_uninitialized || recovering_from_timeout) {
     syncCommandStateToFeedback();
     commanded_state_initialized_ = true;
     right_movej_target_initialized_ = true;
     left_movej_target_initialized_ = true;
+    RCLCPP_INFO(
+      this->get_logger(),
+      "AI Worker Bimanual MoveJ Controller activated. Waiting for moveJ commands...");
+    return;
   }
 }
 
@@ -266,7 +283,13 @@ void AIWorkerBimanualMoveJController::rightTrajectoryCallback(
   if (!msg || !joint_state_received_ || jointStateTimedOut() || !commanded_state_initialized_ || msg->points.empty()) {
     return;
   }
-  if (rclcpp::Duration(msg->points.front().time_from_start).seconds() > 0.0) {
+  const auto duration = rclcpp::Duration(msg->points.front().time_from_start).seconds();
+  if (duration <= -1) {
+    RCLCPP_WARN(this->get_logger(), "Right bimanual moveJ ignored: time_from_start must be > -1.");
+    return;
+  }
+
+  if (duration > 0.0) {
     syncRightArmToFeedback();
   }
   Eigen::VectorXd target_q = q_commanded_;
@@ -274,6 +297,7 @@ void AIWorkerBimanualMoveJController::rightTrajectoryCallback(
     return;
   }
   updateGripperPositionFromTrajectory(*msg, right_gripper_joint_name_, right_gripper_position_);
+  right_movej_start_ = q_commanded_;
   right_movej_goal_ = target_q;
   right_movej_target_initialized_ = true;
 }
@@ -284,7 +308,13 @@ void AIWorkerBimanualMoveJController::leftTrajectoryCallback(
   if (!msg || !joint_state_received_ || jointStateTimedOut() || !commanded_state_initialized_ || msg->points.empty()) {
     return;
   }
-  if (rclcpp::Duration(msg->points.front().time_from_start).seconds() > 0.0) {
+  const auto duration = rclcpp::Duration(msg->points.front().time_from_start).seconds();
+  if (duration <= -1) {
+    RCLCPP_WARN(this->get_logger(), "Left bimanual moveJ ignored: time_from_start must be > -1.");
+    return;
+  }
+
+  if (duration > 0.0) {
     syncLeftArmToFeedback();
   }
   Eigen::VectorXd target_q = q_commanded_;
@@ -292,6 +322,7 @@ void AIWorkerBimanualMoveJController::leftTrajectoryCallback(
     return;
   }
   updateGripperPositionFromTrajectory(*msg, left_gripper_joint_name_, left_gripper_position_);
+  left_movej_start_ = q_commanded_;
   left_movej_goal_ = target_q;
   left_movej_target_initialized_ = true;
 }
@@ -357,16 +388,21 @@ void AIWorkerBimanualMoveJController::updateGripperTriggeredGraspMode()
 
 void AIWorkerBimanualMoveJController::enableGraspConstraint()
 {
+  grasp_release_slow_start_active_ = false;
   captureCurrentGraspConstraint();
 }
 
 void AIWorkerBimanualMoveJController::disableGraspConstraint()
 {
+  const bool was_active = grasp_constraint_active_;
   grasp_constraint_active_ = false;
   gripper_closed_timer_active_ = false;
   gripper_open_timer_active_ = false;
   if (qp_filter_) {
     qp_filter_->setRigidGraspPoseConstraint(false, Eigen::Affine3d::Identity());
+  }
+  if (was_active) {
+    startGraspReleaseSlowStart();
   }
 }
 
@@ -447,7 +483,12 @@ void AIWorkerBimanualMoveJController::controlLoopCallback()
     return;
   }
   if (jointStateTimedOut()) {
-    joint_state_timeout_active_ = true;
+    if (!joint_state_timeout_active_) {
+      joint_state_timeout_active_ = true;
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Joint states timed out. Holding commands until fresh feedback is received.");
+    }
     return;
   }
 
@@ -463,7 +504,21 @@ void AIWorkerBimanualMoveJController::controlLoopCallback()
       assignArmSegment(left_movej_goal_, left_arm_joints_, q_ref);
     }
 
-    const Eigen::VectorXd desired_joint_vel = kp_joint_ * (q_ref - q_feedback);
+    Eigen::VectorXd desired_joint_vel = kp_joint_ * (q_ref - q_feedback);
+    if (grasp_release_slow_start_active_) {
+      const double max_error = maxLeaderCommandError();
+      const double elapsed = (this->now() - grasp_release_slow_start_time_).seconds();
+      if (max_error <= kGraspReleaseSlowStartErrorThreshold ||
+        elapsed >= kGraspReleaseSlowStartMaxDuration)
+      {
+        grasp_release_slow_start_active_ = false;
+      } else {
+        const double max_desired_speed = desired_joint_vel.cwiseAbs().maxCoeff();
+        if (max_desired_speed > kGraspReleaseSlowStartJointSpeed) {
+          desired_joint_vel *= kGraspReleaseSlowStartJointSpeed / max_desired_speed;
+        }
+      }
+    }
     const Eigen::VectorXd joint_weight =
       Eigen::VectorXd::Ones(kinematics_solver_->getDof()) * weight_tracking_;
     const Eigen::VectorXd damping =
@@ -502,8 +557,11 @@ bool AIWorkerBimanualMoveJController::jointStateTimedOut() const
 void AIWorkerBimanualMoveJController::syncCommandStateToFeedback()
 {
   q_commanded_ = q_;
+  right_movej_start_ = q_;
   right_movej_goal_ = q_;
+  left_movej_start_ = q_;
   left_movej_goal_ = q_;
+  grasp_release_slow_start_active_ = false;
 }
 
 void AIWorkerBimanualMoveJController::syncRightArmToFeedback()
@@ -514,6 +572,49 @@ void AIWorkerBimanualMoveJController::syncRightArmToFeedback()
 void AIWorkerBimanualMoveJController::syncLeftArmToFeedback()
 {
   assignArmSegment(q_, left_arm_joints_, q_commanded_);
+}
+
+double AIWorkerBimanualMoveJController::maxLeaderCommandError() const
+{
+  double max_error = 0.0;
+  const auto accumulate_error =
+    [this, &max_error](const Eigen::VectorXd & goal, const std::vector<std::string> & joints) {
+      for (const auto & joint_name : joints) {
+        const auto it = model_joint_index_map_.find(joint_name);
+        if (it == model_joint_index_map_.end()) {
+          continue;
+        }
+        const int index = it->second;
+        if (index < 0 || index >= q_commanded_.size() || index >= goal.size()) {
+          continue;
+        }
+        max_error = std::max(max_error, std::abs(goal[index] - q_commanded_[index]));
+      }
+    };
+
+  if (right_movej_target_initialized_) {
+    accumulate_error(right_movej_goal_, right_arm_joints_);
+  }
+  if (left_movej_target_initialized_) {
+    accumulate_error(left_movej_goal_, left_arm_joints_);
+  }
+  return max_error;
+}
+
+void AIWorkerBimanualMoveJController::startGraspReleaseSlowStart()
+{
+  if (!joint_state_received_ || !commanded_state_initialized_) {
+    return;
+  }
+
+  const double max_error = maxLeaderCommandError();
+  if (max_error < kGraspReleaseSlowStartErrorThreshold) {
+    grasp_release_slow_start_active_ = false;
+    return;
+  }
+
+  grasp_release_slow_start_active_ = true;
+  grasp_release_slow_start_time_ = this->now();
 }
 
 void AIWorkerBimanualMoveJController::publishTrajectory(const Eigen::VectorXd & q_command) const
