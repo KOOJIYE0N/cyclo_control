@@ -109,6 +109,10 @@ add_executable(reference_checker_node
   src/utils/reference_checker_node.cpp
 )
 
+add_executable(bimanual_panel_roll_demo_node
+  src/utils/bimanual_panel_yaw_demo_node.cpp
+)
+
 # Add include directories to the target
 message(STATUS "CYCLO_MOTION_CONTROLLER_CORE_INCLUDE_DIR = ${CYCLO_MOTION_CONTROLLER_CORE_INCLUDE_DIR}")
 
@@ -437,6 +441,25 @@ target_link_libraries(reference_checker_node PRIVATE
   ${geometry_msgs_TARGETS}
 )
 
+target_include_directories(bimanual_panel_roll_demo_node PRIVATE
+  ${rclcpp_INCLUDE_DIRS}
+  ${std_msgs_INCLUDE_DIRS}
+  ${geometry_msgs_INCLUDE_DIRS}
+  ${trajectory_msgs_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}
+)
+target_link_libraries(bimanual_panel_roll_demo_node PRIVATE
+  ${rclcpp_LIBRARIES}
+  ${std_msgs_LIBRARIES}
+  ${geometry_msgs_LIBRARIES}
+  ${trajectory_msgs_LIBRARIES}
+  ${rclcpp_TARGETS}
+  ${std_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${trajectory_msgs_TARGETS}
+  Eigen3::Eigen
+)
+
 target_link_libraries(vr_controller_node PRIVATE
   Eigen3::Eigen
   pinocchio::pinocchio
@@ -569,6 +592,10 @@ install(TARGETS interactive_marker_node
 )
 
 install(TARGETS reference_checker_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS bimanual_panel_roll_demo_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

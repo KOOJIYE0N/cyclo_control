@@ -41,6 +41,11 @@ def generate_launch_description():
             description='Start interactive markers for MoveL goals.',
         ),
         DeclareLaunchArgument(
+            'start_panel_roll_demo',
+            default_value='false',
+            description='Start bimanual panel roll reference publisher demo.',
+        ),
+        DeclareLaunchArgument(
             'base_frame',
             default_value='base_link',
             description='Frame for interactive markers and MoveL goals.',
@@ -177,6 +182,7 @@ def generate_launch_description():
     ]
 
     start_interactive_marker = LaunchConfiguration('start_interactive_marker')
+    start_panel_roll_demo = LaunchConfiguration('start_panel_roll_demo')
     follower_urdf_path = LaunchConfiguration('follower_urdf_path')
     default_srdf_path = LaunchConfiguration('default_srdf_path')
     modified_srdf_path = LaunchConfiguration('modified_srdf_path')
@@ -495,6 +501,33 @@ def generate_launch_description():
         ),
     )
 
+    bimanual_panel_roll_demo_node = Node(
+        package='cyclo_motion_controller_ros',
+        executable='bimanual_panel_roll_demo_node',
+        parameters=[
+            config_file,
+            {
+                'frame_id': base_frame,
+                'right_goal_pose_topic': right_goal_pose_topic,
+                'left_goal_pose_topic': left_goal_pose_topic,
+                'virtual_object_pose_topic': virtual_object_pose_topic,
+                'grasp_capture_topic': grasp_capture_topic,
+            },
+        ],
+        output='screen',
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    controller_type,
+                    "' == 'bimanual_movel' and '",
+                    start_panel_roll_demo,
+                    "' == 'true'",
+                ]
+            )
+        ),
+    )
+
     arm_retargeting_node = Node(
         package='cyclo_motion_controller_ros_py',
         executable='arm_retargeting_teleop',
@@ -546,6 +579,7 @@ def generate_launch_description():
             right_interactive_marker_bimanual,
             left_interactive_marker_bimanual,
             virtual_object_interactive_marker,
+            bimanual_panel_roll_demo_node,
             arm_retargeting_node,
             hand_retargeting_node,
         ]
