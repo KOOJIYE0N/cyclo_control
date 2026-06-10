@@ -34,8 +34,12 @@ private:
   void syncCommandStateToFeedback();
   void syncRightArmToFeedback();
   void syncLeftArmToFeedback();
-  double maxLeaderCommandError() const;
-  void startGraspReleaseSlowStart();
+  double maxLeaderCommandError(
+    const Eigen::VectorXd & goal,
+    const std::vector<std::string> & joints) const;
+  void startGraspReleaseSlowStart(bool right_arm, bool left_arm);
+  void startPendingGraspReleaseSlowStart(bool right_arm, bool left_arm);
+  void enableGraspReleaseArmFollow(bool right_arm, bool left_arm);
 
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void rightTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
@@ -44,7 +48,9 @@ private:
   void controlLoopCallback();
   void updateGripperTriggeredGraspMode();
   void enableGraspConstraint();
-  void disableGraspConstraint();
+  void disableGraspConstraint(
+    bool right_arm_follow_enabled = true,
+    bool left_arm_follow_enabled = true);
 
   bool updateArmTargetFromTrajectory(
     const trajectory_msgs::msg::JointTrajectory & msg,
@@ -55,7 +61,7 @@ private:
     const Eigen::VectorXd & source,
     const std::vector<std::string> & arm_joint_names,
     Eigen::VectorXd & destination) const;
-  void updateGripperPositionFromTrajectory(
+  bool updateGripperPositionFromTrajectory(
     const trajectory_msgs::msg::JointTrajectory & msg,
     const std::string & gripper_joint_name,
     double & gripper_position) const;
@@ -131,6 +137,8 @@ private:
   Eigen::VectorXd right_movej_goal_;
   Eigen::VectorXd left_movej_start_;
   Eigen::VectorXd left_movej_goal_;
+  Eigen::VectorXd right_release_hold_goal_;
+  Eigen::VectorXd left_release_hold_goal_;
 
   bool joint_state_received_;
   bool commanded_state_initialized_;
@@ -139,20 +147,27 @@ private:
   bool joint_state_timeout_active_ = false;
   bool grasp_constraint_active_ = false;
   bool manual_grasp_latch_ = false;
-  bool right_gripper_joint_state_received_ = false;
-  bool left_gripper_joint_state_received_ = false;
+  bool right_gripper_command_received_ = false;
+  bool left_gripper_command_received_ = false;
   bool gripper_closed_timer_active_ = false;
-  bool gripper_open_timer_active_ = false;
-  bool grasp_release_slow_start_active_ = false;
+  bool right_gripper_open_timer_active_ = false;
+  bool left_gripper_open_timer_active_ = false;
+  bool grasp_release_follow_limited_ = false;
+  bool right_release_follow_enabled_ = true;
+  bool left_release_follow_enabled_ = true;
+  bool right_grasp_release_slow_start_pending_ = false;
+  bool left_grasp_release_slow_start_pending_ = false;
+  bool right_grasp_release_slow_start_active_ = false;
+  bool left_grasp_release_slow_start_active_ = false;
 
   double right_gripper_position_;
   double left_gripper_position_;
-  double right_gripper_joint_state_position_ = 0.0;
-  double left_gripper_joint_state_position_ = 0.0;
   rclcpp::Time last_joint_state_time_;
   rclcpp::Time gripper_closed_since_;
-  rclcpp::Time gripper_open_since_;
-  rclcpp::Time grasp_release_slow_start_time_;
+  rclcpp::Time right_gripper_open_since_;
+  rclcpp::Time left_gripper_open_since_;
+  rclcpp::Time right_grasp_release_slow_start_time_;
+  rclcpp::Time left_grasp_release_slow_start_time_;
   Eigen::Affine3d grasp_right_to_left_ = Eigen::Affine3d::Identity();
 
   std::vector<std::string> left_arm_joints_;

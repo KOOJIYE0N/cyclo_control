@@ -10,6 +10,11 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   last_right_goal_cmd_time_(this->now()),
   last_left_goal_cmd_time_(this->now())
 {
+  RCLCPP_INFO(this->get_logger(), "========================================");
+  RCLCPP_INFO(this->get_logger(), "AI Worker Bimanual MoveL Controller - Starting up...");
+  RCLCPP_INFO(this->get_logger(), "Node name: %s", this->get_name());
+  RCLCPP_INFO(this->get_logger(), "========================================");
+
   control_frequency_ = this->declare_parameter("control_frequency", 100.0);
   time_step_ = this->declare_parameter("time_step", 0.01);
   trajectory_time_ = this->declare_parameter("trajectory_time", 0.0);
@@ -81,6 +86,13 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   l_gripper_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(l_gripper_pose_topic_, 10);
 
   try {
+    RCLCPP_INFO(this->get_logger(), "URDF path: %s", urdf_path_.c_str());
+    if (srdf_path_.empty()) {
+      RCLCPP_INFO(this->get_logger(), "SRDF path not provided. Continuing without SRDF.");
+    } else {
+      RCLCPP_INFO(this->get_logger(), "SRDF path: %s", srdf_path_.c_str());
+    }
+
     kinematics_solver_ = std::make_shared<cyclo_motion_controller::kinematics::KinematicsSolver>(
       urdf_path_, srdf_path_);
     qp_controller_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveLController>(
@@ -106,9 +118,14 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   control_timer_ = this->create_wall_timer(
     std::chrono::milliseconds(timer_period_ms),
     std::bind(&AIWorkerBimanualMoveLControllerNode::controlLoopCallback, this));
+
+  RCLCPP_INFO(this->get_logger(), "AI Worker Bimanual MoveL Controller initialized successfully!");
 }
 
-AIWorkerBimanualMoveLControllerNode::~AIWorkerBimanualMoveLControllerNode() {}
+AIWorkerBimanualMoveLControllerNode::~AIWorkerBimanualMoveLControllerNode()
+{
+  RCLCPP_INFO(this->get_logger(), "Shutting down AI Worker Bimanual MoveL Controller");
+}
 
 void AIWorkerBimanualMoveLControllerNode::initializeJointConfig()
 {
@@ -187,6 +204,9 @@ void AIWorkerBimanualMoveLControllerNode::jointStateCallback(const sensor_msgs::
   if (!q_desired_initialized_) {
     syncCommandStateToFeedback();
     q_desired_initialized_ = true;
+    RCLCPP_INFO(
+      this->get_logger(),
+      "AI Worker Bimanual MoveL Controller activated. Waiting for pose commands...");
   }
 }
 
@@ -223,6 +243,7 @@ void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::m
   }
 
   if (!msg->data) {
+    RCLCPP_INFO(this->get_logger(), "Bimanual MoveL grasp mode deactivated by capture topic.");
     grasp_constraint_active_ = false;
     qp_controller_->setRigidGraspPoseConstraint(false, Eigen::Affine3d::Identity());
     if (joint_state_received_) {
@@ -241,6 +262,7 @@ void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::m
     virtual_object_goal_updated_ = false;
     return;
   }
+  RCLCPP_INFO(this->get_logger(), "Bimanual MoveL grasp mode activation requested by capture topic.");
   captureCurrentGraspConstraint();
 }
 
@@ -311,6 +333,7 @@ void AIWorkerBimanualMoveLControllerNode::captureCurrentGraspConstraint()
   virtual_object_goal_pose_ = object_pose;
   virtual_object_goal_received_ = true;
   virtual_object_goal_updated_ = false;
+  RCLCPP_INFO(this->get_logger(), "Bimanual MoveL grasp constraint enabled.");
 }
 
 void AIWorkerBimanualMoveLControllerNode::applyBimanualGoalProjection(
@@ -333,10 +356,18 @@ void AIWorkerBimanualMoveLControllerNode::applyBimanualGoalProjection(
 void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
 {
   if (!joint_state_received_ || !q_desired_initialized_) {
+    RCLCPP_WARN_THROTTLE(
+      this->get_logger(), *this->get_clock(), 2000,
+      "Bimanual MoveL control loop waiting for joint states...");
     return;
   }
   if (jointStateTimedOut()) {
-    joint_state_timeout_active_ = true;
+    if (!joint_state_timeout_active_) {
+      joint_state_timeout_active_ = true;
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Joint states timed out. Holding commands until fresh feedback is received.");
+    }
     return;
   }
 
@@ -437,6 +468,9 @@ void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
 
     Eigen::VectorXd optimal_velocities;
     if (!qp_controller_->getOptJointVel(optimal_velocities)) {
+      RCLCPP_WARN_THROTTLE(
+        this->get_logger(), *this->get_clock(), 1000,
+        "AI Worker Bimanual MoveL QP solver failed");
       return;
     }
 
