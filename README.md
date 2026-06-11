@@ -145,51 +145,77 @@ Launch AI Worker controllers:
 ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py
 ```
 
-You can switch AI Worker controllers via `controller_type`:
+Launch arguments:
 
-- default launch runs `ai_worker_movel_controller_node`
-- `controller_type:=movel` runs `ai_worker_movel_controller_node`
-- `controller_type:=movej` runs `ai_worker_movej_controller_node`
-- `controller_type:=vr` runs `vr_controller_node` and `reference_checker_node`; when `hand:=true`, it also runs `retargeting_teleop`
-- `controller_type:=leader` runs `leader_controller_node` together with `vr_controller_node`
+| Argument | Default | Description |
+| --- | --- | --- |
+| `controller_type` | `movel` | Selects the controller mode. Available values are listed below. |
+| `config_file` | package default | Controller YAML file. |
+| `follower_urdf_path` | package default | Follower robot URDF. |
+| `default_srdf_path` | package default | Default follower robot SRDF. |
+| `modified_srdf_path` | package default | Follower robot SRDF with gripper-to-gripper collision disabled. |
+| `disable_gripper_collisions` | `false` | Uses `modified_srdf_path` instead of `default_srdf_path`. |
 
-In `vr` mode, arm retargeting is enabled by default (`arm:=true`) and starts `arm_retargeting_teleop` to map tracked arm motion into follower arm commands.
+`controller_type` values:
 
-Example launch commands:
+| Value | Started nodes |
+| --- | --- |
+| `movel` | `ai_worker_movel_controller_node` |
+| `movej` | `ai_worker_movej_controller_node` |
+| `bimanual_movel` | `ai_worker_bimanual_movel_controller_node` |
+| `bimanual_movej` | `ai_worker_bimanual_movej_controller_node` |
+| `vr` | `vr_controller_node`, `reference_checker_node` |
+| `leader` | `leader_controller_node`, `vr_controller_node` |
 
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py controller_type:=movel start_interactive_marker:=true
-```
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py controller_type:=movej
-```
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py controller_type:=vr
-```
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py controller_type:=vr hand:=true
-```
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py controller_type:=vr arm:=false
-```
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py controller_type:=leader
-```
-```bash
-ros2 launch cyclo_motion_controller_ros ai_worker_controller.launch.py disable_gripper_collisions:=true
-```
+Interactive marker arguments:
+
+| Argument | Default | Description |
+| --- | --- | --- |
+| `start_interactive_marker` | `false` | Starts MoveL interactive markers for `movel` and `bimanual_movel`. |
+| `base_frame` | `base_link` | Frame used by interactive markers and MoveL goals. |
+| `marker_scale` | `0.2` | Interactive marker scale. |
+| `right_controlled_link` | `end_effector_r_link` | Follower link tracked by the right marker. |
+| `left_controlled_link` | `end_effector_l_link` | Follower link tracked by the left marker. |
+| `right_movel_topic` | `/r_goal_move` | MoveL command topic for the right marker. |
+| `left_movel_topic` | `/l_goal_move` | MoveL command topic for the left marker. |
+| `right_goal_pose_topic` | `/r_goal_pose` | PoseStamped mirror topic for the right marker. |
+| `left_goal_pose_topic` | `/l_goal_pose` | PoseStamped mirror topic for the left marker. |
+
+Bimanual MoveL arguments:
+
+| Argument | Default | Description |
+| --- | --- | --- |
+| `grasp_capture_topic` | `/capture_grasp` | Bool topic used to enable or disable bimanual rigid grasp mode. |
+| `virtual_object_movel_topic` | `/virtual_object_goal_move` | MoveL command topic for the bimanual virtual object marker. |
+| `virtual_object_pose_topic` | `/virtual_object_goal_pose` | PoseStamped mirror topic for the virtual object marker. |
+
+VR and leader arguments:
+
+| Argument | Default | Description |
+| --- | --- | --- |
+| `reactivate_topic` | `/reactivate` | Bool topic used to toggle the VR controller. |
+| `leader_urdf_path` | package default | Leader robot URDF used by `controller_type:=leader`. |
+| `arm` | `true` | Enables arm retargeting in `vr` mode. |
+| `hand` | `false` | Enables hand retargeting in `vr` mode. |
 
 When `controller_type:=movel` and `start_interactive_marker:=true`, `ai_worker_controller.launch.py` starts two configurable interactive markers:
 
 - right marker uses `right_controlled_link` and publishes MoveL commands to `right_movel_topic`
 - left marker uses `left_controlled_link` and publishes MoveL commands to `left_movel_topic`
 
+When `controller_type:=bimanual_movel` and `start_interactive_marker:=true`, the launch file starts right and left hand markers while grasp mode is inactive. These markers publish `robotis_interfaces/msg/MoveL` commands to `right_movel_topic` and `left_movel_topic`. The marker commands use `time_from_start: 0`, so the bimanual MoveL controller treats them as direct servo goals, matching the normal MoveL controller behavior.
+
+The bimanual MoveL controller also supports rigid grasp control:
+
+- publish `true` to `grasp_capture_topic` to capture the current relative grasp between both hands
+- while grasp mode is active, the right and left hand markers are disabled
+- a virtual object marker is enabled and publishes MoveL commands to `virtual_object_movel_topic`
+- virtual-object MoveL commands with `time_from_start: 0` act as direct marker goals; positive durations are interpolated inside the controller
+- publish `false` to `grasp_capture_topic` to release rigid grasp control and return to independent hand MoveL goals
+
 To disable collision checking only between the two grippers, set `disable_gripper_collisions:=true`. This helps maintain smooth handover-style motions when the grippers come into contact.
 
-In `vr` mode, the `hand` launch argument enables hand teleoperation through the retargeting algorithm. It defaults to `false`.
-The `arm` launch argument controls arm retargeting in `vr` mode and defaults to `true`.
-
-Example `movel` commands:
+Example `movel` commands for normal and bimanual MoveL:
 
 ```bash
 ros2 topic pub --once /r_goal_move robotis_interfaces/msg/MoveL "{
@@ -217,6 +243,42 @@ ros2 topic pub --once /l_goal_move robotis_interfaces/msg/MoveL "{
 }"
 ```
 
+For marker-style direct servo goals, set `time_from_start` to zero:
+
+```bash
+ros2 topic pub --once /r_goal_move robotis_interfaces/msg/MoveL "{
+  pose: {
+    header: {frame_id: 'base_link'},
+    pose: {
+      position: {x: 0.35, y: -0.20, z: 0.85},
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    }
+  },
+  time_from_start: {sec: 0, nanosec: 0}
+}"
+```
+
+For bimanual rigid grasp mode, command the virtual object with:
+
+```bash
+ros2 topic pub --once /capture_grasp std_msgs/msg/Bool "{data: true}"
+```
+
+```bash
+ros2 topic pub --once /virtual_object_goal_move robotis_interfaces/msg/MoveL "{
+  pose: {
+    header: {frame_id: 'base_link'},
+    pose: {
+      position: {x: 0.35, y: 0.00, z: 0.85},
+      orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}
+    }
+  },
+  time_from_start: {sec: 0, nanosec: 0}
+}"
+```
+
+`movel` interpolation duration is supplied per command via `time_from_start`. A value of zero is intended for marker-based control and makes the controller track the latest goal directly.
+
 Example `movej` input commands:
 
 ```bash
@@ -243,7 +305,7 @@ ros2 topic pub --once /leader/joint_trajectory_command_broadcaster_left/raw_join
 }"
 ```
 
-`ai_worker_movej_controller` subscribes to the raw trajectory topics and republishes filtered trajectories while preserving gripper values from the input message.
+`ai_worker_movej_controller` subscribes to the raw trajectory topics and republishes filtered trajectories while preserving gripper values from the input message. `ai_worker_bimanual_movej_controller` uses the same raw trajectory topics, adds bimanual rigid-grasp filtering when enabled through `grasp_capture_topic`, and republishes filtered arm trajectories.
 
 ### OMX Controllers
 
