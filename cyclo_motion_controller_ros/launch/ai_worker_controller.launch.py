@@ -96,6 +96,11 @@ def generate_launch_description():
             description='PoseStamped topic for virtual object goal.',
         ),
         DeclareLaunchArgument(
+            'virtual_object_movel_topic',
+            default_value='/virtual_object_goal_move',
+            description='MoveL topic for virtual object interactive marker.',
+        ),
+        DeclareLaunchArgument(
             'grasp_capture_topic',
             default_value='/capture_grasp',
             description='Bool topic to toggle grasp capture mode.',
@@ -198,6 +203,7 @@ def generate_launch_description():
     right_goal_pose_topic = LaunchConfiguration('right_goal_pose_topic')
     left_goal_pose_topic = LaunchConfiguration('left_goal_pose_topic')
     virtual_object_pose_topic = LaunchConfiguration('virtual_object_pose_topic')
+    virtual_object_movel_topic = LaunchConfiguration('virtual_object_movel_topic')
     grasp_capture_topic = LaunchConfiguration('grasp_capture_topic')
     config_file = LaunchConfiguration('config_file')
     controller_type = LaunchConfiguration('controller_type')
@@ -475,7 +481,7 @@ def generate_launch_description():
                 'controlled_link': right_controlled_link,
                 'secondary_controlled_link': left_controlled_link,
                 'initialize_at_midpoint': True,
-                'goal_topic': right_movel_topic,
+                'goal_topic': virtual_object_movel_topic,
                 'pose_goal_topic': virtual_object_pose_topic,
                 'active_topic': grasp_capture_topic,
                 'server_name': 'virtual_object_marker_server',
@@ -508,9 +514,9 @@ def generate_launch_description():
             config_file,
             {
                 'frame_id': base_frame,
-                'right_goal_pose_topic': right_goal_pose_topic,
-                'left_goal_pose_topic': left_goal_pose_topic,
-                'virtual_object_pose_topic': virtual_object_pose_topic,
+                'right_movel_topic': right_movel_topic,
+                'left_movel_topic': left_movel_topic,
+                'virtual_object_movel_topic': virtual_object_movel_topic,
                 'grasp_capture_topic': grasp_capture_topic,
             },
         ],

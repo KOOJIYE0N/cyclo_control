@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <robotis_interfaces/msg/move_l.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/bool.hpp>
@@ -27,16 +28,24 @@ public:
   ~AIWorkerBimanualMoveLControllerNode();
 
 private:
+  static double commandDurationSeconds(const builtin_interfaces::msg::Duration & duration_msg)
+  {
+    return rclcpp::Duration(duration_msg).seconds();
+  }
+
   void initializeJointConfig();
   void extractJointStates(const sensor_msgs::msg::JointState::SharedPtr & msg);
   void publishTrajectory(const Eigen::VectorXd & q_desired) const;
   void publishGripperPose(const Eigen::Affine3d & right_pose, const Eigen::Affine3d & left_pose);
   bool jointStateTimedOut() const;
   void syncCommandStateToFeedback();
+  void syncArmStateToFeedback(
+    const std::vector<std::string> & arm_joint_names,
+    Eigen::VectorXd & destination) const;
 
-  void rightGoalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void leftGoalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void virtualObjectPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+  void rightMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg);
+  void leftMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg);
+  void virtualObjectMoveLCallback(const robotis_interfaces::msg::MoveL::SharedPtr msg);
   void graspCaptureCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void controlLoopCallback();
@@ -44,7 +53,10 @@ private:
   Eigen::Affine3d poseMsgToEigen(const geometry_msgs::msg::PoseStamped & pose_msg) const;
   cyclo_motion_controller::common::Vector6d computeDesiredVelocity(
     const Eigen::Affine3d & current_pose,
-    const Eigen::Affine3d & goal_pose) const;
+    const Eigen::Affine3d & goal_pose,
+    const Eigen::Vector3d & feedforward_linear = Eigen::Vector3d::Zero(),
+    const Eigen::Vector3d & feedforward_angular = Eigen::Vector3d::Zero()) const;
+  Eigen::Affine3d currentObjectPose() const;
   void captureCurrentGraspConstraint();
 
   trajectory_msgs::msg::JointTrajectory createArmTrajectoryMsg(
@@ -67,12 +79,10 @@ private:
   double collision_buffer_;
   double collision_safe_distance_;
   double joint_state_timeout_;
-  double goal_command_timeout_;
-  double passive_hold_weight_scale_;
   std::string joint_states_topic_;
-  std::string right_goal_pose_topic_;
-  std::string left_goal_pose_topic_;
-  std::string virtual_object_pose_topic_;
+  std::string right_movel_topic_;
+  std::string left_movel_topic_;
+  std::string virtual_object_movel_topic_;
   std::string grasp_capture_topic_;
   std::string right_traj_topic_;
   std::string left_traj_topic_;
@@ -85,9 +95,9 @@ private:
   std::string urdf_path_;
   std::string srdf_path_;
 
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_goal_pose_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_goal_pose_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr virtual_object_pose_sub_;
+  rclcpp::Subscription<robotis_interfaces::msg::MoveL>::SharedPtr right_movel_sub_;
+  rclcpp::Subscription<robotis_interfaces::msg::MoveL>::SharedPtr left_movel_sub_;
+  rclcpp::Subscription<robotis_interfaces::msg::MoveL>::SharedPtr virtual_object_movel_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr grasp_capture_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
 
@@ -109,23 +119,33 @@ private:
 
   Eigen::Affine3d right_gripper_pose_;
   Eigen::Affine3d left_gripper_pose_;
-  Eigen::Affine3d right_goal_pose_;
-  Eigen::Affine3d left_goal_pose_;
-  Eigen::Affine3d virtual_object_goal_pose_ = Eigen::Affine3d::Identity();
+  Eigen::Affine3d right_movel_start_pose_;
+  Eigen::Affine3d left_movel_start_pose_;
+  Eigen::Affine3d virtual_object_start_pose_;
+  Eigen::Affine3d right_movel_goal_pose_;
+  Eigen::Affine3d left_movel_goal_pose_;
+  Eigen::Affine3d virtual_object_goal_pose_;
   Eigen::Affine3d grasp_object_to_right_ = Eigen::Affine3d::Identity();
   Eigen::Affine3d grasp_object_to_left_ = Eigen::Affine3d::Identity();
 
-  bool right_goal_pose_received_ = false;
-  bool left_goal_pose_received_ = false;
-  bool virtual_object_goal_received_ = false;
+  bool right_movel_target_initialized_ = false;
+  bool left_movel_target_initialized_ = false;
+  bool virtual_object_target_initialized_ = false;
+  bool right_movel_trajectory_active_ = false;
+  bool left_movel_trajectory_active_ = false;
+  bool virtual_object_trajectory_active_ = false;
   bool joint_state_received_ = false;
   bool q_desired_initialized_ = false;
   bool joint_state_timeout_active_ = false;
   bool grasp_constraint_active_ = false;
 
   rclcpp::Time last_joint_state_time_;
-  rclcpp::Time last_right_goal_cmd_time_;
-  rclcpp::Time last_left_goal_cmd_time_;
+  rclcpp::Time right_motion_start_time_;
+  rclcpp::Time left_motion_start_time_;
+  rclcpp::Time virtual_object_motion_start_time_;
+  double right_active_motion_duration_ = 0.0;
+  double left_active_motion_duration_ = 0.0;
+  double virtual_object_active_motion_duration_ = 0.0;
 
   std::vector<std::string> left_arm_joints_;
   std::vector<std::string> right_arm_joints_;

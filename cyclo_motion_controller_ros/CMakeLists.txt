@@ -253,6 +253,7 @@ target_include_directories(ai_worker_bimanual_movel_controller_node PRIVATE
   ${rclcpp_INCLUDE_DIRS}
   ${std_msgs_INCLUDE_DIRS}
   ${geometry_msgs_INCLUDE_DIRS}
+  ${robotis_interfaces_INCLUDE_DIRS}
   ${sensor_msgs_INCLUDE_DIRS}
   ${trajectory_msgs_INCLUDE_DIRS}
 )
@@ -260,11 +261,13 @@ target_link_libraries(ai_worker_bimanual_movel_controller_node PRIVATE
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
   ${geometry_msgs_LIBRARIES}
+  ${robotis_interfaces_LIBRARIES}
   ${sensor_msgs_LIBRARIES}
   ${trajectory_msgs_LIBRARIES}
   ${rclcpp_TARGETS}
   ${std_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
+  ${robotis_interfaces_TARGETS}
   ${sensor_msgs_TARGETS}
   ${trajectory_msgs_TARGETS}
 )
@@ -445,6 +448,7 @@ target_include_directories(bimanual_panel_roll_demo_node PRIVATE
   ${rclcpp_INCLUDE_DIRS}
   ${std_msgs_INCLUDE_DIRS}
   ${geometry_msgs_INCLUDE_DIRS}
+  ${robotis_interfaces_INCLUDE_DIRS}
   ${trajectory_msgs_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIR}
 )
@@ -452,10 +456,12 @@ target_link_libraries(bimanual_panel_roll_demo_node PRIVATE
   ${rclcpp_LIBRARIES}
   ${std_msgs_LIBRARIES}
   ${geometry_msgs_LIBRARIES}
+  ${robotis_interfaces_LIBRARIES}
   ${trajectory_msgs_LIBRARIES}
   ${rclcpp_TARGETS}
   ${std_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
+  ${robotis_interfaces_TARGETS}
   ${trajectory_msgs_TARGETS}
   Eigen3::Eigen
 )

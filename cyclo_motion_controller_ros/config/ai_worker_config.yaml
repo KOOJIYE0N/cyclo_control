@@ -72,13 +72,11 @@ ai_worker_bimanual_movel_controller:
     slack_penalty: 1000.0
     cbf_alpha: 50.0
     joint_state_timeout: 0.5
-    goal_command_timeout: 0.2
-    passive_hold_weight_scale: 5.0
 
     joint_states_topic: "/joint_states"
-    right_goal_pose_topic: "/r_goal_pose"
-    left_goal_pose_topic: "/l_goal_pose"
-    virtual_object_pose_topic: "/virtual_object_goal_pose"
+    right_movel_topic: "/r_goal_move"
+    left_movel_topic: "/l_goal_move"
+    virtual_object_movel_topic: "/virtual_object_goal_move"
     grasp_capture_topic: "/capture_grasp"
     right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
     left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
