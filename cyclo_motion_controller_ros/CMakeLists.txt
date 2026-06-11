@@ -110,7 +110,7 @@ add_executable(reference_checker_node
 )
 
 add_executable(bimanual_panel_roll_demo_node
-  src/utils/bimanual_panel_yaw_demo_node.cpp
+  src/utils/bimanual_panel_roll_demo_node.cpp
 )
 
 # Add include directories to the target
