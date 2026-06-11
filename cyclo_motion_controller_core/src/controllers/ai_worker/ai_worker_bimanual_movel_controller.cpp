@@ -1,27 +1,11 @@
 #include "controllers/ai_worker/ai_worker_bimanual_movel_controller.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace cyclo_motion_controller
 {
 namespace controllers
 {
-namespace
-{
-Eigen::Matrix3d skew(const Eigen::Vector3d & v)
-{
-  Eigen::Matrix3d s = Eigen::Matrix3d::Zero();
-  s(0, 1) = -v.z();
-  s(0, 2) = v.y();
-  s(1, 0) = v.z();
-  s(1, 2) = -v.x();
-  s(2, 0) = -v.y();
-  s(2, 1) = v.x();
-  return s;
-}
-}  // namespace
-
 AIWorkerBimanualMoveLController::AIWorkerBimanualMoveLController(
   std::shared_ptr<cyclo_motion_controller::kinematics::KinematicsSolver> robot_data,
   const double dt)
@@ -241,7 +225,8 @@ void AIWorkerBimanualMoveLController::setEqConstraint()
     right_pose.linear() * rigid_right_to_left_in_right_.translation();
 
   Eigen::Matrix<double, 6, 6> transform = Eigen::Matrix<double, 6, 6>::Identity();
-  transform.block<3, 3>(0, 3) = -skew(right_to_left_world);
+  transform.block<3, 3>(0, 3) =
+    -cyclo_motion_controller::common::skewSymmetric(right_to_left_world);
   A_eq_ds_.block(si_index_.eq_grasp_start, si_index_.qdot_start,
     si_index_.eq_grasp_size, si_index_.qdot_size) = jl - transform * jr;
 
@@ -250,13 +235,9 @@ void AIWorkerBimanualMoveLController::setEqConstraint()
   const Eigen::Vector3d position_error = left_pose.translation() - desired_left_pose.translation();
   b_eq_ds_.segment<3>(si_index_.eq_grasp_start) = -position_error / dt;
 
-  const Eigen::Matrix3d rotation_error =
-    desired_left_pose.linear() * left_pose.linear().transpose();
-  const Eigen::AngleAxisd angle_axis_error(rotation_error);
-  Eigen::Vector3d orientation_error = Eigen::Vector3d::Zero();
-  if (std::isfinite(angle_axis_error.angle()) && angle_axis_error.angle() > 1e-9) {
-    orientation_error = angle_axis_error.axis() * angle_axis_error.angle();
-  }
+  const Eigen::Vector3d orientation_error =
+    cyclo_motion_controller::common::shortestOrientationError(
+    desired_left_pose.linear(), left_pose.linear());
   b_eq_ds_.segment<3>(si_index_.eq_grasp_start + 3) = orientation_error / dt;
 }
 }  // namespace controllers

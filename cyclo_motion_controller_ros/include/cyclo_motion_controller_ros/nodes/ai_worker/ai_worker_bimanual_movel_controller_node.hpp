@@ -33,9 +33,6 @@ private:
   void publishGripperPose(const Eigen::Affine3d & right_pose, const Eigen::Affine3d & left_pose);
   bool jointStateTimedOut() const;
   void syncCommandStateToFeedback();
-  void syncArmStateToFeedback(
-    const std::vector<std::string> & arm_joint_names,
-    Eigen::VectorXd & destination) const;
 
   void rightGoalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void leftGoalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
@@ -48,12 +45,7 @@ private:
   cyclo_motion_controller::common::Vector6d computeDesiredVelocity(
     const Eigen::Affine3d & current_pose,
     const Eigen::Affine3d & goal_pose) const;
-  Eigen::Affine3d blendPoses(
-    const Eigen::Affine3d & pose_a, const Eigen::Affine3d & pose_b, double blend) const;
   void captureCurrentGraspConstraint();
-  void applyBimanualGoalProjection(
-    Eigen::Affine3d & right_goal_pose,
-    Eigen::Affine3d & left_goal_pose) const;
 
   trajectory_msgs::msg::JointTrajectory createArmTrajectoryMsg(
     const std::vector<std::string> & arm_joint_names,
@@ -74,12 +66,9 @@ private:
   double cbf_alpha_;
   double collision_buffer_;
   double collision_safe_distance_;
-  double rigid_grasp_position_recovery_gain_;
-  double rigid_grasp_orientation_recovery_gain_;
   double joint_state_timeout_;
   double goal_command_timeout_;
   double passive_hold_weight_scale_;
-  double grasp_blend_ratio_;
   std::string joint_states_topic_;
   std::string right_goal_pose_topic_;
   std::string left_goal_pose_topic_;
@@ -128,10 +117,7 @@ private:
 
   bool right_goal_pose_received_ = false;
   bool left_goal_pose_received_ = false;
-  bool right_goal_pose_updated_ = false;
-  bool left_goal_pose_updated_ = false;
   bool virtual_object_goal_received_ = false;
-  bool virtual_object_goal_updated_ = false;
   bool joint_state_received_ = false;
   bool q_desired_initialized_ = false;
   bool joint_state_timeout_active_ = false;

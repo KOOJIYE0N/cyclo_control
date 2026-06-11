@@ -27,14 +27,9 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   cbf_alpha_ = this->declare_parameter("cbf_alpha", 5.0);
   collision_buffer_ = this->declare_parameter("collision_buffer", 0.05);
   collision_safe_distance_ = this->declare_parameter("collision_safe_distance", 0.02);
-  rigid_grasp_position_recovery_gain_ =
-    this->declare_parameter("rigid_grasp_position_recovery_gain", 10.0);
-  rigid_grasp_orientation_recovery_gain_ =
-    this->declare_parameter("rigid_grasp_orientation_recovery_gain", 10.0);
   joint_state_timeout_ = this->declare_parameter("joint_state_timeout", 0.5);
   goal_command_timeout_ = this->declare_parameter("goal_command_timeout", 0.2);
   passive_hold_weight_scale_ = this->declare_parameter("passive_hold_weight_scale", 5.0);
-  grasp_blend_ratio_ = this->declare_parameter("grasp_blend_ratio", 0.5);
   urdf_path_ = this->declare_parameter("urdf_path", std::string(""));
   srdf_path_ = this->declare_parameter("srdf_path", std::string(""));
   joint_states_topic_ = this->declare_parameter("joint_states_topic", std::string("/joint_states"));
@@ -215,7 +210,6 @@ void AIWorkerBimanualMoveLControllerNode::rightGoalPoseCallback(
 {
   right_goal_pose_ = poseMsgToEigen(*msg);
   right_goal_pose_received_ = true;
-  right_goal_pose_updated_ = true;
   last_right_goal_cmd_time_ = this->now();
 }
 
@@ -224,7 +218,6 @@ void AIWorkerBimanualMoveLControllerNode::leftGoalPoseCallback(
 {
   left_goal_pose_ = poseMsgToEigen(*msg);
   left_goal_pose_received_ = true;
-  left_goal_pose_updated_ = true;
   last_left_goal_cmd_time_ = this->now();
 }
 
@@ -233,7 +226,6 @@ void AIWorkerBimanualMoveLControllerNode::virtualObjectPoseCallback(
 {
   virtual_object_goal_pose_ = poseMsgToEigen(*msg);
   virtual_object_goal_received_ = true;
-  virtual_object_goal_updated_ = true;
 }
 
 void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::msg::Bool::SharedPtr msg)
@@ -256,10 +248,7 @@ void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::m
       left_goal_pose_ = kinematics_solver_->getPose(l_gripper_name_);
       right_goal_pose_received_ = true;
       left_goal_pose_received_ = true;
-      right_goal_pose_updated_ = false;
-      left_goal_pose_updated_ = false;
     }
-    virtual_object_goal_updated_ = false;
     return;
   }
   RCLCPP_INFO(this->get_logger(), "Bimanual MoveL grasp mode activation requested by capture topic.");
@@ -271,12 +260,13 @@ Eigen::Affine3d AIWorkerBimanualMoveLControllerNode::poseMsgToEigen(
 {
   Eigen::Affine3d pose = Eigen::Affine3d::Identity();
   pose.translation() << pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z;
-  const Eigen::Quaterniond quat(
-    pose_msg.pose.orientation.w,
-    pose_msg.pose.orientation.x,
-    pose_msg.pose.orientation.y,
-    pose_msg.pose.orientation.z);
-  pose.linear() = quat.normalized().toRotationMatrix();
+  const Eigen::Quaterniond quat =
+    cyclo_motion_controller::common::normalizedQuaternion(Eigen::Quaterniond(
+      pose_msg.pose.orientation.w,
+      pose_msg.pose.orientation.x,
+      pose_msg.pose.orientation.y,
+      pose_msg.pose.orientation.z));
+  pose.linear() = quat.toRotationMatrix();
   return pose;
 }
 
@@ -287,30 +277,12 @@ cyclo_motion_controller::common::Vector6d AIWorkerBimanualMoveLControllerNode::c
   cyclo_motion_controller::common::Vector6d desired_vel =
     cyclo_motion_controller::common::Vector6d::Zero();
   const Eigen::Vector3d position_error = goal_pose.translation() - current_pose.translation();
-  const Eigen::Matrix3d rotation_error = goal_pose.linear() * current_pose.linear().transpose();
-  const Eigen::AngleAxisd angle_axis_error(rotation_error);
-  const Eigen::Vector3d orientation_error = angle_axis_error.axis() * angle_axis_error.angle();
+  const Eigen::Vector3d orientation_error =
+    cyclo_motion_controller::common::shortestOrientationError(
+    goal_pose.linear(), current_pose.linear());
   desired_vel.head<3>() = kp_position_ * position_error;
   desired_vel.tail<3>() = kp_orientation_ * orientation_error;
   return desired_vel;
-}
-
-Eigen::Affine3d AIWorkerBimanualMoveLControllerNode::blendPoses(
-  const Eigen::Affine3d & pose_a,
-  const Eigen::Affine3d & pose_b,
-  const double blend) const
-{
-  const double alpha = std::clamp(blend, 0.0, 1.0);
-  const Eigen::Vector3d blended_position =
-    (1.0 - alpha) * pose_a.translation() + alpha * pose_b.translation();
-  const Eigen::Quaterniond qa(pose_a.linear());
-  const Eigen::Quaterniond qb(pose_b.linear());
-  const Eigen::Quaterniond blended_orientation = qa.slerp(alpha, qb).normalized();
-
-  Eigen::Affine3d blended_pose = Eigen::Affine3d::Identity();
-  blended_pose.translation() = blended_position;
-  blended_pose.linear() = blended_orientation.toRotationMatrix();
-  return blended_pose;
 }
 
 void AIWorkerBimanualMoveLControllerNode::captureCurrentGraspConstraint()
@@ -324,33 +296,16 @@ void AIWorkerBimanualMoveLControllerNode::captureCurrentGraspConstraint()
   const Eigen::Affine3d left_pose = kinematics_solver_->getPose(l_gripper_name_);
   Eigen::Affine3d object_pose = Eigen::Affine3d::Identity();
   object_pose.translation() = 0.5 * (right_pose.translation() + left_pose.translation());
-  const Eigen::Quaterniond qr(right_pose.linear());
-  const Eigen::Quaterniond ql(left_pose.linear());
-  object_pose.linear() = qr.slerp(0.5, ql).normalized().toRotationMatrix();
+  object_pose.linear() =
+    cyclo_motion_controller::common::shortestSlerp(
+      Eigen::Quaterniond(right_pose.linear()), Eigen::Quaterniond(left_pose.linear()), 0.5)
+    .toRotationMatrix();
   grasp_object_to_right_ = object_pose.inverse() * right_pose;
   grasp_object_to_left_ = object_pose.inverse() * left_pose;
   grasp_constraint_active_ = true;
   virtual_object_goal_pose_ = object_pose;
   virtual_object_goal_received_ = true;
-  virtual_object_goal_updated_ = false;
   RCLCPP_INFO(this->get_logger(), "Bimanual MoveL grasp constraint enabled.");
-}
-
-void AIWorkerBimanualMoveLControllerNode::applyBimanualGoalProjection(
-  Eigen::Affine3d & right_goal_pose,
-  Eigen::Affine3d & left_goal_pose) const
-{
-  if (!grasp_constraint_active_) {
-    return;
-  }
-
-  const Eigen::Affine3d object_from_right = right_goal_pose * grasp_object_to_right_.inverse();
-  const Eigen::Affine3d object_from_left = left_goal_pose * grasp_object_to_left_.inverse();
-  const Eigen::Affine3d blended_object_pose =
-    blendPoses(object_from_right, object_from_left, grasp_blend_ratio_);
-
-  right_goal_pose = blended_object_pose * grasp_object_to_right_;
-  left_goal_pose = blended_object_pose * grasp_object_to_left_;
 }
 
 void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
@@ -419,10 +374,7 @@ void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
       constrained_left_goal = object_goal * grasp_object_to_left_;
       right_goal_pose_ = constrained_right_goal;
       left_goal_pose_ = constrained_left_goal;
-      virtual_object_goal_updated_ = false;
     }
-    right_goal_pose_updated_ = false;
-    left_goal_pose_updated_ = false;
 
     std::map<std::string, cyclo_motion_controller::common::Vector6d> desired_task_velocities;
     desired_task_velocities[r_gripper_name_] =
@@ -490,19 +442,6 @@ bool AIWorkerBimanualMoveLControllerNode::jointStateTimedOut() const
 void AIWorkerBimanualMoveLControllerNode::syncCommandStateToFeedback()
 {
   q_desired_ = q_;
-}
-
-void AIWorkerBimanualMoveLControllerNode::syncArmStateToFeedback(
-  const std::vector<std::string> & arm_joint_names,
-  Eigen::VectorXd & destination) const
-{
-  for (const auto & joint_name : arm_joint_names) {
-    const auto it = model_joint_index_map_.find(joint_name);
-    if (it == model_joint_index_map_.end()) {
-      continue;
-    }
-    destination[it->second] = q_[it->second];
-  }
 }
 
 void AIWorkerBimanualMoveLControllerNode::publishTrajectory(const Eigen::VectorXd & q_desired) const
@@ -579,7 +518,8 @@ void AIWorkerBimanualMoveLControllerNode::publishGripperPose(
   right_msg.pose.position.x = right_pose.translation().x();
   right_msg.pose.position.y = right_pose.translation().y();
   right_msg.pose.position.z = right_pose.translation().z();
-  const Eigen::Quaterniond right_quat(right_pose.linear());
+  const Eigen::Quaterniond right_quat =
+    cyclo_motion_controller::common::normalizedQuaternion(right_pose.linear());
   right_msg.pose.orientation.w = right_quat.w();
   right_msg.pose.orientation.x = right_quat.x();
   right_msg.pose.orientation.y = right_quat.y();
@@ -592,7 +532,8 @@ void AIWorkerBimanualMoveLControllerNode::publishGripperPose(
   left_msg.pose.position.x = left_pose.translation().x();
   left_msg.pose.position.y = left_pose.translation().y();
   left_msg.pose.position.z = left_pose.translation().z();
-  const Eigen::Quaterniond left_quat(left_pose.linear());
+  const Eigen::Quaterniond left_quat =
+    cyclo_motion_controller::common::normalizedQuaternion(left_pose.linear());
   left_msg.pose.orientation.w = left_quat.w();
   left_msg.pose.orientation.x = left_quat.x();
   left_msg.pose.orientation.y = left_quat.y();

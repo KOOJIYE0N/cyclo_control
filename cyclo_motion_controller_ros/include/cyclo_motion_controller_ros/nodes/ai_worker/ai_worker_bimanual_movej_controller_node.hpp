@@ -14,7 +14,6 @@
 #include <std_msgs/msg/bool.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 
-#include "common/type_define.hpp"
 #include "controllers/ai_worker/ai_worker_bimanual_movej_controller.hpp"
 #include "kinematics/kinematics_solver.hpp"
 
@@ -39,6 +38,7 @@ private:
     const std::vector<std::string> & joints) const;
   void startGraspReleaseSlowStart(bool right_arm, bool left_arm);
   void startPendingGraspReleaseSlowStart(bool right_arm, bool left_arm);
+  void startPendingGraspEnableBlend(bool right_arm, bool left_arm);
   void enableGraspReleaseArmFollow(bool right_arm, bool left_arm);
 
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
@@ -65,15 +65,7 @@ private:
     const trajectory_msgs::msg::JointTrajectory & msg,
     const std::string & gripper_joint_name,
     double & gripper_position) const;
-  cyclo_motion_controller::common::Vector6d computeDesiredTaskVelocity(
-    const Eigen::Affine3d & current_pose,
-    const Eigen::Affine3d & goal_pose) const;
-  Eigen::Affine3d blendPoses(
-    const Eigen::Affine3d & pose_a, const Eigen::Affine3d & pose_b, double blend) const;
   void captureCurrentGraspConstraint();
-  void applyBimanualGoalProjection(
-    Eigen::Affine3d & right_goal_pose,
-    Eigen::Affine3d & left_goal_pose) const;
 
   trajectory_msgs::msg::JointTrajectory createTrajectoryMsgWithGripper(
     const std::vector<std::string> & arm_joint_names,
@@ -87,17 +79,11 @@ private:
   double trajectory_time_;
   double kp_joint_;
   double weight_tracking_;
-  double kp_grasp_position_;
-  double kp_grasp_orientation_;
-  double weight_position_;
-  double weight_orientation_;
   double weight_damping_;
   double slack_penalty_;
   double cbf_alpha_;
   double collision_buffer_;
   double collision_safe_distance_;
-  double rigid_grasp_position_recovery_gain_;
-  double rigid_grasp_orientation_recovery_gain_;
   double joint_state_timeout_;
   double gripper_grasp_threshold_;
   double gripper_grasp_hold_time_;
@@ -113,8 +99,6 @@ private:
   std::string left_gripper_joint_name_;
   std::string urdf_path_;
   std::string srdf_path_;
-  double grasp_blend_ratio_;
-
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr r_traj_sub_;
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr l_traj_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
@@ -139,6 +123,8 @@ private:
   Eigen::VectorXd left_movej_goal_;
   Eigen::VectorXd right_release_hold_goal_;
   Eigen::VectorXd left_release_hold_goal_;
+  Eigen::VectorXd right_grasp_enable_blend_start_;
+  Eigen::VectorXd left_grasp_enable_blend_start_;
 
   bool joint_state_received_;
   bool commanded_state_initialized_;
@@ -159,6 +145,10 @@ private:
   bool left_grasp_release_slow_start_pending_ = false;
   bool right_grasp_release_slow_start_active_ = false;
   bool left_grasp_release_slow_start_active_ = false;
+  bool right_grasp_enable_blend_pending_ = false;
+  bool left_grasp_enable_blend_pending_ = false;
+  bool right_grasp_enable_blend_active_ = false;
+  bool left_grasp_enable_blend_active_ = false;
 
   double right_gripper_position_;
   double left_gripper_position_;
@@ -168,6 +158,8 @@ private:
   rclcpp::Time left_gripper_open_since_;
   rclcpp::Time right_grasp_release_slow_start_time_;
   rclcpp::Time left_grasp_release_slow_start_time_;
+  rclcpp::Time right_grasp_enable_blend_start_time_;
+  rclcpp::Time left_grasp_enable_blend_start_time_;
   Eigen::Affine3d grasp_right_to_left_ = Eigen::Affine3d::Identity();
 
   std::vector<std::string> left_arm_joints_;

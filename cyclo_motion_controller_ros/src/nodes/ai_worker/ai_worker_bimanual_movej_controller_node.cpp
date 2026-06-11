@@ -1,7 +1,6 @@
 #include "cyclo_motion_controller_ros/nodes/ai_worker/ai_worker_bimanual_movej_controller_node.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace cyclo_motion_controller_ros
 {
@@ -10,6 +9,7 @@ namespace
 constexpr double kGraspReleaseSlowStartErrorThreshold = 0.08;
 constexpr double kGraspReleaseSlowStartJointSpeed = 0.3;
 constexpr double kGraspReleaseSlowStartMaxDuration = 6.0;
+constexpr double kGraspEnableBlendDuration = 4.0;
 }  // namespace
 
 AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
@@ -32,19 +32,11 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
   trajectory_time_ = this->declare_parameter("trajectory_time", 0.0);
   kp_joint_ = this->declare_parameter("kp_joint", 6.0);
   weight_tracking_ = this->declare_parameter("weight_tracking", 1.0);
-  kp_grasp_position_ = this->declare_parameter("kp_grasp_position", 10.0);
-  kp_grasp_orientation_ = this->declare_parameter("kp_grasp_orientation", 10.0);
-  weight_position_ = this->declare_parameter("weight_position", 10.0);
-  weight_orientation_ = this->declare_parameter("weight_orientation", 1.0);
   weight_damping_ = this->declare_parameter("weight_damping", 0.1);
   slack_penalty_ = this->declare_parameter("slack_penalty", 1000.0);
   cbf_alpha_ = this->declare_parameter("cbf_alpha", 5.0);
   collision_buffer_ = this->declare_parameter("collision_buffer", 0.05);
   collision_safe_distance_ = this->declare_parameter("collision_safe_distance", 0.02);
-  rigid_grasp_position_recovery_gain_ =
-    this->declare_parameter("rigid_grasp_position_recovery_gain", 10.0);
-  rigid_grasp_orientation_recovery_gain_ =
-    this->declare_parameter("rigid_grasp_orientation_recovery_gain", 10.0);
   joint_state_timeout_ = this->declare_parameter("joint_state_timeout", 0.5);
   gripper_grasp_threshold_ = this->declare_parameter("gripper_grasp_threshold", 0.85);
   gripper_grasp_hold_time_ = this->declare_parameter("gripper_grasp_hold_time", 2.0);
@@ -70,7 +62,6 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
     "left_gripper_joint", std::string("gripper_l_joint1"));
   r_gripper_name_ = this->declare_parameter("r_gripper_name", std::string("arm_r_link7"));
   l_gripper_name_ = this->declare_parameter("l_gripper_name", std::string("arm_l_link7"));
-  grasp_blend_ratio_ = this->declare_parameter("grasp_blend_ratio", 0.5);
 
   if (urdf_path_.empty()) {
     RCLCPP_FATAL(this->get_logger(), "URDF path not provided.");
@@ -121,6 +112,8 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
     left_movej_goal_.setZero(dof);
     right_release_hold_goal_.setZero(dof);
     left_release_hold_goal_.setZero(dof);
+    right_grasp_enable_blend_start_.setZero(dof);
+    left_grasp_enable_blend_start_.setZero(dof);
     initializeJointConfig();
   } catch (const std::exception & e) {
     RCLCPP_FATAL(this->get_logger(), "Failed to initialize bimanual moveJ filter: %s", e.what());
@@ -316,6 +309,7 @@ void AIWorkerBimanualMoveJController::rightTrajectoryCallback(
   if (!right_release_follow_enabled_) {
     assignArmSegment(right_release_hold_goal_, right_arm_joints_, right_movej_goal_);
   } else {
+    startPendingGraspEnableBlend(true, false);
     startPendingGraspReleaseSlowStart(true, false);
   }
 }
@@ -349,6 +343,7 @@ void AIWorkerBimanualMoveJController::leftTrajectoryCallback(
   if (!left_release_follow_enabled_) {
     assignArmSegment(left_release_hold_goal_, left_arm_joints_, left_movej_goal_);
   } else {
+    startPendingGraspEnableBlend(false, true);
     startPendingGraspReleaseSlowStart(false, true);
   }
 }
@@ -449,10 +444,14 @@ void AIWorkerBimanualMoveJController::enableGraspConstraint()
   grasp_release_follow_limited_ = false;
   right_release_follow_enabled_ = true;
   left_release_follow_enabled_ = true;
-  right_grasp_release_slow_start_pending_ = was_limited_release;
-  left_grasp_release_slow_start_pending_ = was_limited_release;
+  right_grasp_release_slow_start_pending_ = false;
+  left_grasp_release_slow_start_pending_ = false;
   right_grasp_release_slow_start_active_ = false;
   left_grasp_release_slow_start_active_ = false;
+  right_grasp_enable_blend_pending_ = was_limited_release;
+  left_grasp_enable_blend_pending_ = was_limited_release;
+  right_grasp_enable_blend_active_ = false;
+  left_grasp_enable_blend_active_ = false;
   right_release_hold_goal_ = q_commanded_;
   left_release_hold_goal_ = q_commanded_;
   captureCurrentGraspConstraint();
@@ -462,7 +461,8 @@ void AIWorkerBimanualMoveJController::enableGraspConstraint()
       RCLCPP_INFO(
         this->get_logger(),
         "Bimanual MoveJ grasp re-enabled after partial release. "
-        "Leader rejoin will use per-arm slow start.");
+        "Leader rejoin will blend over %.1f seconds.",
+        kGraspEnableBlendDuration);
     }
   }
 }
@@ -500,35 +500,6 @@ void AIWorkerBimanualMoveJController::disableGraspConstraint(
   }
 }
 
-cyclo_motion_controller::common::Vector6d AIWorkerBimanualMoveJController::computeDesiredTaskVelocity(
-  const Eigen::Affine3d & current_pose, const Eigen::Affine3d & goal_pose) const
-{
-  cyclo_motion_controller::common::Vector6d desired_vel =
-    cyclo_motion_controller::common::Vector6d::Zero();
-  const Eigen::Vector3d position_error = goal_pose.translation() - current_pose.translation();
-  const Eigen::Matrix3d rotation_error = goal_pose.linear() * current_pose.linear().transpose();
-  const Eigen::AngleAxisd angle_axis_error(rotation_error);
-  const Eigen::Vector3d orientation_error = angle_axis_error.axis() * angle_axis_error.angle();
-  desired_vel.head<3>() = kp_grasp_position_ * position_error;
-  desired_vel.tail<3>() = kp_grasp_orientation_ * orientation_error;
-  return desired_vel;
-}
-
-Eigen::Affine3d AIWorkerBimanualMoveJController::blendPoses(
-  const Eigen::Affine3d & pose_a, const Eigen::Affine3d & pose_b, const double blend) const
-{
-  const double alpha = std::clamp(blend, 0.0, 1.0);
-  const Eigen::Vector3d blended_position =
-    (1.0 - alpha) * pose_a.translation() + alpha * pose_b.translation();
-  const Eigen::Quaterniond qa(pose_a.linear());
-  const Eigen::Quaterniond qb(pose_b.linear());
-  const Eigen::Quaterniond blended_orientation = qa.slerp(alpha, qb).normalized();
-  Eigen::Affine3d blended_pose = Eigen::Affine3d::Identity();
-  blended_pose.translation() = blended_position;
-  blended_pose.linear() = blended_orientation.toRotationMatrix();
-  return blended_pose;
-}
-
 void AIWorkerBimanualMoveJController::captureCurrentGraspConstraint()
 {
   if (!joint_state_received_) {
@@ -540,21 +511,6 @@ void AIWorkerBimanualMoveJController::captureCurrentGraspConstraint()
   const Eigen::Affine3d left_pose = kinematics_solver_->getPose(l_gripper_name_);
   grasp_right_to_left_ = right_pose.inverse() * left_pose;
   grasp_constraint_active_ = true;
-}
-
-void AIWorkerBimanualMoveJController::applyBimanualGoalProjection(
-  Eigen::Affine3d & right_goal_pose,
-  Eigen::Affine3d & left_goal_pose) const
-{
-  if (!grasp_constraint_active_) {
-    return;
-  }
-  const Eigen::Affine3d object_from_right = right_goal_pose;
-  const Eigen::Affine3d object_from_left = left_goal_pose * grasp_right_to_left_.inverse();
-  const Eigen::Affine3d blended_object_pose =
-    blendPoses(object_from_right, object_from_left, grasp_blend_ratio_);
-  right_goal_pose = blended_object_pose;
-  left_goal_pose = blended_object_pose * grasp_right_to_left_;
 }
 
 void AIWorkerBimanualMoveJController::assignArmSegment(
@@ -604,6 +560,54 @@ void AIWorkerBimanualMoveJController::controlLoopCallback()
     } else if (!left_release_follow_enabled_) {
       assignArmSegment(left_release_hold_goal_, left_arm_joints_, q_ref);
     }
+
+    const auto apply_grasp_enable_blend =
+      [this, &q_ref](
+      const char * arm_name,
+      const Eigen::VectorXd & blend_start,
+      const Eigen::VectorXd & goal,
+      const std::vector<std::string> & joints,
+      bool & blend_active,
+      const rclcpp::Time & blend_start_time) {
+        if (!blend_active) {
+          return;
+        }
+        const double elapsed = (this->now() - blend_start_time).seconds();
+        const double alpha = std::clamp(elapsed / kGraspEnableBlendDuration, 0.0, 1.0);
+        for (const auto & joint_name : joints) {
+          const auto it = model_joint_index_map_.find(joint_name);
+          if (it == model_joint_index_map_.end()) {
+            continue;
+          }
+          const int index = it->second;
+          if (index < 0 || index >= q_ref.size() || index >= blend_start.size() ||
+            index >= goal.size())
+          {
+            continue;
+          }
+          q_ref[index] = (1.0 - alpha) * blend_start[index] + alpha * goal[index];
+        }
+        if (alpha >= 1.0) {
+          blend_active = false;
+          RCLCPP_INFO(
+            this->get_logger(),
+            "Bimanual MoveJ %s arm grasp-enable blend completed.", arm_name);
+        }
+      };
+    apply_grasp_enable_blend(
+      "right",
+      right_grasp_enable_blend_start_,
+      right_movej_goal_,
+      right_arm_joints_,
+      right_grasp_enable_blend_active_,
+      right_grasp_enable_blend_start_time_);
+    apply_grasp_enable_blend(
+      "left",
+      left_grasp_enable_blend_start_,
+      left_movej_goal_,
+      left_arm_joints_,
+      left_grasp_enable_blend_active_,
+      left_grasp_enable_blend_start_time_);
 
     Eigen::VectorXd desired_joint_vel = kp_joint_ * (q_ref - q_feedback);
     const auto apply_slow_start =
@@ -713,6 +717,8 @@ void AIWorkerBimanualMoveJController::syncCommandStateToFeedback()
   left_movej_goal_ = q_;
   right_release_hold_goal_ = q_;
   left_release_hold_goal_ = q_;
+  right_grasp_enable_blend_start_ = q_;
+  left_grasp_enable_blend_start_ = q_;
   grasp_release_follow_limited_ = false;
   right_release_follow_enabled_ = true;
   left_release_follow_enabled_ = true;
@@ -720,6 +726,10 @@ void AIWorkerBimanualMoveJController::syncCommandStateToFeedback()
   left_grasp_release_slow_start_pending_ = false;
   right_grasp_release_slow_start_active_ = false;
   left_grasp_release_slow_start_active_ = false;
+  right_grasp_enable_blend_pending_ = false;
+  left_grasp_enable_blend_pending_ = false;
+  right_grasp_enable_blend_active_ = false;
+  left_grasp_enable_blend_active_ = false;
 }
 
 void AIWorkerBimanualMoveJController::syncRightArmToFeedback()
@@ -783,6 +793,33 @@ void AIWorkerBimanualMoveJController::startPendingGraspReleaseSlowStart(
   }
   if (left_arm && left_grasp_release_slow_start_pending_) {
     startGraspReleaseSlowStart(false, true);
+  }
+}
+
+void AIWorkerBimanualMoveJController::startPendingGraspEnableBlend(
+  const bool right_arm,
+  const bool left_arm)
+{
+  const rclcpp::Time now = this->now();
+  if (right_arm && right_grasp_enable_blend_pending_) {
+    assignArmSegment(q_commanded_, right_arm_joints_, right_grasp_enable_blend_start_);
+    right_grasp_enable_blend_pending_ = false;
+    right_grasp_enable_blend_active_ = true;
+    right_grasp_enable_blend_start_time_ = now;
+    RCLCPP_INFO(
+      this->get_logger(),
+      "Bimanual MoveJ right arm grasp-enable blend started for %.1f seconds.",
+      kGraspEnableBlendDuration);
+  }
+  if (left_arm && left_grasp_enable_blend_pending_) {
+    assignArmSegment(q_commanded_, left_arm_joints_, left_grasp_enable_blend_start_);
+    left_grasp_enable_blend_pending_ = false;
+    left_grasp_enable_blend_active_ = true;
+    left_grasp_enable_blend_start_time_ = now;
+    RCLCPP_INFO(
+      this->get_logger(),
+      "Bimanual MoveJ left arm grasp-enable blend started for %.1f seconds.",
+      kGraspEnableBlendDuration);
   }
 }
 
