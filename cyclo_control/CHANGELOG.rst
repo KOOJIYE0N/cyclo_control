@@ -2,6 +2,10 @@
 Changelog for package cyclo_control
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-06-18)
+------------------
+* None
+
 0.2.0 (2026-05-04)
 ------------------
 * Added arm retargeting feature for AI Worker vr controller
