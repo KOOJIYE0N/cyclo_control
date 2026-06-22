@@ -167,7 +167,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'controller_type',
             default_value='movel',
-            description='Controller type (movel, movej, bimanual_movel, bimanual_movej, leader, vr). Default: movel.',
+            description=(
+                'Controller type (movel, movej, bimanual_movel, '
+                'bimanual_movej, leader, vr). Default: movel.'
+            ),
         ),
         DeclareLaunchArgument(
             'arm',
