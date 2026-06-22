@@ -2,6 +2,11 @@
 Changelog for package cyclo_motion_controller_models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.3.0 (2026-06-18)
+------------------
+* Modified omx srdf to disable collision between link6 and link7
+* Contributors: Yeonguk Kim
+
 0.2.0 (2026-05-04)
 ------------------
 * None
