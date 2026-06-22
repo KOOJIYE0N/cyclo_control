@@ -250,16 +250,19 @@ private:
       initial_pose_.pose.position.x = 0.5 * (initial_pose_.pose.position.x + secondary_pose.pose.position.x);
       initial_pose_.pose.position.y = 0.5 * (initial_pose_.pose.position.y + secondary_pose.pose.position.y);
       initial_pose_.pose.position.z = 0.5 * (initial_pose_.pose.position.z + secondary_pose.pose.position.z);
-      const Eigen::Quaterniond q_primary(
+      const Eigen::Quaterniond q_primary = Eigen::Quaterniond(
         initial_pose_.pose.orientation.w,
         initial_pose_.pose.orientation.x,
         initial_pose_.pose.orientation.y,
-        initial_pose_.pose.orientation.z);
-      const Eigen::Quaterniond q_secondary(
+        initial_pose_.pose.orientation.z).normalized();
+      Eigen::Quaterniond q_secondary = Eigen::Quaterniond(
         secondary_pose.pose.orientation.w,
         secondary_pose.pose.orientation.x,
         secondary_pose.pose.orientation.y,
-        secondary_pose.pose.orientation.z);
+        secondary_pose.pose.orientation.z).normalized();
+      if (q_primary.dot(q_secondary) < 0.0) {
+        q_secondary.coeffs() *= -1.0;
+      }
       const Eigen::Quaterniond q_mid = q_primary.slerp(0.5, q_secondary).normalized();
       initial_pose_.pose.orientation.w = q_mid.w();
       initial_pose_.pose.orientation.x = q_mid.x();
