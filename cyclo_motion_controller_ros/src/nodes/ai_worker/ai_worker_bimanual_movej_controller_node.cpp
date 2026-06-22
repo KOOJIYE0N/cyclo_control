@@ -1,3 +1,19 @@
+// Copyright 2026 ROBOTIS CO., LTD.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Author: Yeonguk Kim
+
 #include "cyclo_motion_controller_ros/nodes/ai_worker/ai_worker_bimanual_movej_controller_node.hpp"
 
 #include <algorithm>
@@ -49,7 +65,8 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
   left_traj_topic_ = this->declare_parameter(
     "left_traj_topic",
     std::string("/leader/joint_trajectory_command_broadcaster_left/raw_joint_trajectory"));
-  grasp_capture_topic_ = this->declare_parameter("grasp_capture_topic", std::string("/capture_grasp"));
+  grasp_capture_topic_ = this->declare_parameter("grasp_capture_topic",
+      std::string("/capture_grasp"));
   right_traj_filtered_topic_ = this->declare_parameter(
     "right_traj_filtered_topic",
     std::string("/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"));
@@ -78,10 +95,12 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
     std::bind(&AIWorkerBimanualMoveJController::jointStateCallback, this, std::placeholders::_1));
   r_traj_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
     right_traj_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveJController::rightTrajectoryCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveJController::rightTrajectoryCallback, this,
+      std::placeholders::_1));
   l_traj_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
     left_traj_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveJController::leftTrajectoryCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveJController::leftTrajectoryCallback, this,
+      std::placeholders::_1));
   grasp_capture_sub_ = this->create_subscription<std_msgs::msg::Bool>(
     grasp_capture_topic_, 10,
     std::bind(&AIWorkerBimanualMoveJController::graspCaptureCallback, this, std::placeholders::_1));
@@ -95,8 +114,10 @@ AIWorkerBimanualMoveJController::AIWorkerBimanualMoveJController()
     }
 
     kinematics_solver_ =
-      std::make_shared<cyclo_motion_controller::kinematics::KinematicsSolver>(urdf_path_, srdf_path_);
-    qp_filter_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveJController>(
+      std::make_shared<cyclo_motion_controller::kinematics::KinematicsSolver>(urdf_path_,
+        srdf_path_);
+    qp_filter_ =
+      std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveJController>(
       kinematics_solver_, time_step_);
     qp_filter_->setControllerParams(
       slack_penalty_, cbf_alpha_, collision_buffer_, collision_safe_distance_);
@@ -243,7 +264,8 @@ bool AIWorkerBimanualMoveJController::updateArmTargetFromTrajectory(
   }
   const auto & point = msg.points.front();
   if (point.positions.empty()) {
-    RCLCPP_WARN(this->get_logger(), "%s bimanual moveJ ignored: positions are empty.", arm_name.c_str());
+    RCLCPP_WARN(this->get_logger(), "%s bimanual moveJ ignored: positions are empty.",
+        arm_name.c_str());
     return false;
   }
 
@@ -282,7 +304,9 @@ bool AIWorkerBimanualMoveJController::updateArmTargetFromTrajectory(
 void AIWorkerBimanualMoveJController::rightTrajectoryCallback(
   const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
 {
-  if (!msg || !joint_state_received_ || jointStateTimedOut() || !commanded_state_initialized_ || msg->points.empty()) {
+  if (!msg || !joint_state_received_ || jointStateTimedOut() || !commanded_state_initialized_ ||
+    msg->points.empty())
+  {
     return;
   }
   const auto duration = rclcpp::Duration(msg->points.front().time_from_start).seconds();
@@ -301,7 +325,9 @@ void AIWorkerBimanualMoveJController::rightTrajectoryCallback(
   right_movej_start_ = q_commanded_;
   right_movej_goal_ = target_q;
   right_movej_target_initialized_ = true;
-  if (updateGripperPositionFromTrajectory(*msg, right_gripper_joint_name_, right_gripper_position_)) {
+  if (updateGripperPositionFromTrajectory(*msg, right_gripper_joint_name_,
+      right_gripper_position_))
+  {
     right_gripper_command_received_ = true;
     updateGripperTriggeredGraspMode();
   }
@@ -316,7 +342,9 @@ void AIWorkerBimanualMoveJController::rightTrajectoryCallback(
 void AIWorkerBimanualMoveJController::leftTrajectoryCallback(
   const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
 {
-  if (!msg || !joint_state_received_ || jointStateTimedOut() || !commanded_state_initialized_ || msg->points.empty()) {
+  if (!msg || !joint_state_received_ || jointStateTimedOut() || !commanded_state_initialized_ ||
+    msg->points.empty())
+  {
     return;
   }
   const auto duration = rclcpp::Duration(msg->points.front().time_from_start).seconds();
@@ -359,7 +387,8 @@ void AIWorkerBimanualMoveJController::graspCaptureCallback(const std_msgs::msg::
     return;
   }
   manual_grasp_latch_ = true;
-  RCLCPP_INFO(this->get_logger(), "Bimanual MoveJ grasp mode activation requested by capture topic.");
+  RCLCPP_INFO(this->get_logger(),
+      "Bimanual MoveJ grasp mode activation requested by capture topic.");
   enableGraspConstraint();
 }
 
@@ -833,12 +862,14 @@ void AIWorkerBimanualMoveJController::enableGraspReleaseArmFollow(
   if (right_arm) {
     right_release_follow_enabled_ = true;
     right_grasp_release_slow_start_pending_ = true;
-    RCLCPP_INFO(this->get_logger(), "Bimanual MoveJ right arm follow enabled after gripper release.");
+    RCLCPP_INFO(this->get_logger(),
+        "Bimanual MoveJ right arm follow enabled after gripper release.");
   }
   if (left_arm) {
     left_release_follow_enabled_ = true;
     left_grasp_release_slow_start_pending_ = true;
-    RCLCPP_INFO(this->get_logger(), "Bimanual MoveJ left arm follow enabled after gripper release.");
+    RCLCPP_INFO(this->get_logger(),
+        "Bimanual MoveJ left arm follow enabled after gripper release.");
   }
   grasp_release_follow_limited_ = !(right_release_follow_enabled_ && left_release_follow_enabled_);
 }
@@ -863,15 +894,18 @@ void AIWorkerBimanualMoveJController::publishTrajectory(const Eigen::VectorXd & 
 
   if (!left_arm_indices.empty()) {
     arm_l_pub_->publish(createTrajectoryMsgWithGripper(
-      left_arm_joints_, q_command, left_arm_indices, left_gripper_joint_name_, left_gripper_position_));
+      left_arm_joints_, q_command, left_arm_indices, left_gripper_joint_name_,
+        left_gripper_position_));
   }
   if (!right_arm_indices.empty()) {
     arm_r_pub_->publish(createTrajectoryMsgWithGripper(
-      right_arm_joints_, q_command, right_arm_indices, right_gripper_joint_name_, right_gripper_position_));
+      right_arm_joints_, q_command, right_arm_indices, right_gripper_joint_name_,
+        right_gripper_position_));
   }
 }
 
-trajectory_msgs::msg::JointTrajectory AIWorkerBimanualMoveJController::createTrajectoryMsgWithGripper(
+trajectory_msgs::msg::JointTrajectory AIWorkerBimanualMoveJController::
+createTrajectoryMsgWithGripper(
   const std::vector<std::string> & arm_joint_names,
   const Eigen::VectorXd & positions,
   const std::vector<int> & arm_indices,

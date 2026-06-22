@@ -1,3 +1,19 @@
+// Copyright 2026 ROBOTIS CO., LTD.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Author: Yeonguk Kim
+
 #include "cyclo_motion_controller_ros/nodes/ai_worker/ai_worker_bimanual_movel_controller_node.hpp"
 
 #include <algorithm>
@@ -36,7 +52,8 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   left_movel_topic_ = this->declare_parameter("left_movel_topic", std::string("/l_goal_move"));
   virtual_object_movel_topic_ = this->declare_parameter(
     "virtual_object_movel_topic", std::string("/virtual_object_goal_move"));
-  grasp_capture_topic_ = this->declare_parameter("grasp_capture_topic", std::string("/capture_grasp"));
+  grasp_capture_topic_ = this->declare_parameter("grasp_capture_topic",
+      std::string("/capture_grasp"));
   right_traj_topic_ = this->declare_parameter(
     "right_traj_topic",
     std::string("/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"));
@@ -46,8 +63,10 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
   lift_topic_ = this->declare_parameter(
     "lift_topic", std::string("/leader/joystick_controller_right/joint_trajectory"));
   lift_vel_bound_ = this->declare_parameter("lift_vel_bound", 0.0);
-  r_gripper_pose_topic_ = this->declare_parameter("r_gripper_pose_topic", std::string("/r_gripper_pose"));
-  l_gripper_pose_topic_ = this->declare_parameter("l_gripper_pose_topic", std::string("/l_gripper_pose"));
+  r_gripper_pose_topic_ = this->declare_parameter("r_gripper_pose_topic",
+      std::string("/r_gripper_pose"));
+  l_gripper_pose_topic_ = this->declare_parameter("l_gripper_pose_topic",
+      std::string("/l_gripper_pose"));
   r_gripper_name_ = this->declare_parameter("r_gripper_name", std::string("arm_r_link7"));
   l_gripper_name_ = this->declare_parameter("l_gripper_name", std::string("arm_l_link7"));
 
@@ -59,25 +78,32 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
 
   right_movel_sub_ = this->create_subscription<robotis_interfaces::msg::MoveL>(
     right_movel_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveLControllerNode::rightMoveLCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveLControllerNode::rightMoveLCallback, this,
+      std::placeholders::_1));
   left_movel_sub_ = this->create_subscription<robotis_interfaces::msg::MoveL>(
     left_movel_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveLControllerNode::leftMoveLCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveLControllerNode::leftMoveLCallback, this,
+      std::placeholders::_1));
   virtual_object_movel_sub_ = this->create_subscription<robotis_interfaces::msg::MoveL>(
     virtual_object_movel_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveLControllerNode::virtualObjectMoveLCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveLControllerNode::virtualObjectMoveLCallback, this,
+      std::placeholders::_1));
   grasp_capture_sub_ = this->create_subscription<std_msgs::msg::Bool>(
     grasp_capture_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveLControllerNode::graspCaptureCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveLControllerNode::graspCaptureCallback, this,
+      std::placeholders::_1));
   joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
     joint_states_topic_, 10,
-    std::bind(&AIWorkerBimanualMoveLControllerNode::jointStateCallback, this, std::placeholders::_1));
+    std::bind(&AIWorkerBimanualMoveLControllerNode::jointStateCallback, this,
+      std::placeholders::_1));
 
   arm_r_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(right_traj_topic_, 10);
   arm_l_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(left_traj_topic_, 10);
   lift_pub_ = this->create_publisher<trajectory_msgs::msg::JointTrajectory>(lift_topic_, 10);
-  r_gripper_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(r_gripper_pose_topic_, 10);
-  l_gripper_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(l_gripper_pose_topic_, 10);
+  r_gripper_pose_pub_ =
+    this->create_publisher<geometry_msgs::msg::PoseStamped>(r_gripper_pose_topic_, 10);
+  l_gripper_pose_pub_ =
+    this->create_publisher<geometry_msgs::msg::PoseStamped>(l_gripper_pose_topic_, 10);
 
   try {
     RCLCPP_INFO(this->get_logger(), "URDF path: %s", urdf_path_.c_str());
@@ -89,7 +115,8 @@ AIWorkerBimanualMoveLControllerNode::AIWorkerBimanualMoveLControllerNode()
 
     kinematics_solver_ = std::make_shared<cyclo_motion_controller::kinematics::KinematicsSolver>(
       urdf_path_, srdf_path_);
-    qp_controller_ = std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveLController>(
+    qp_controller_ =
+      std::make_shared<cyclo_motion_controller::controllers::AIWorkerBimanualMoveLController>(
       kinematics_solver_, time_step_);
     qp_controller_->setControllerParams(
       slack_penalty_, cbf_alpha_, collision_buffer_, collision_safe_distance_);
@@ -182,7 +209,8 @@ void AIWorkerBimanualMoveLControllerNode::extractJointStates(
   }
 }
 
-void AIWorkerBimanualMoveLControllerNode::jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+void AIWorkerBimanualMoveLControllerNode::jointStateCallback(
+  const sensor_msgs::msg::JointState::SharedPtr msg)
 {
   joint_index_map_.clear();
   for (size_t i = 0; i < msg->name.size(); ++i) {
@@ -273,7 +301,8 @@ void AIWorkerBimanualMoveLControllerNode::virtualObjectMoveLCallback(
   virtual_object_trajectory_active_ = virtual_object_active_motion_duration_ > 0.0;
 }
 
-void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::msg::Bool::SharedPtr msg)
+void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(
+  const std_msgs::msg::Bool::SharedPtr msg)
 {
   if (!msg) {
     return;
@@ -300,7 +329,8 @@ void AIWorkerBimanualMoveLControllerNode::graspCaptureCallback(const std_msgs::m
     }
     return;
   }
-  RCLCPP_INFO(this->get_logger(), "Bimanual MoveL grasp mode activation requested by capture topic.");
+  RCLCPP_INFO(this->get_logger(),
+      "Bimanual MoveL grasp mode activation requested by capture topic.");
   captureCurrentGraspConstraint();
 }
 
@@ -308,7 +338,8 @@ Eigen::Affine3d AIWorkerBimanualMoveLControllerNode::poseMsgToEigen(
   const geometry_msgs::msg::PoseStamped & pose_msg) const
 {
   Eigen::Affine3d pose = Eigen::Affine3d::Identity();
-  pose.translation() << pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z;
+  pose.translation() << pose_msg.pose.position.x, pose_msg.pose.position.y,
+    pose_msg.pose.position.z;
   const Eigen::Quaterniond quat =
     cyclo_motion_controller::common::normalizedQuaternion(Eigen::Quaterniond(
       pose_msg.pose.orientation.w,
@@ -319,7 +350,8 @@ Eigen::Affine3d AIWorkerBimanualMoveLControllerNode::poseMsgToEigen(
   return pose;
 }
 
-cyclo_motion_controller::common::Vector6d AIWorkerBimanualMoveLControllerNode::computeDesiredVelocity(
+cyclo_motion_controller::common::Vector6d AIWorkerBimanualMoveLControllerNode::
+computeDesiredVelocity(
   const Eigen::Affine3d & current_pose,
   const Eigen::Affine3d & goal_pose,
   const Eigen::Vector3d & feedforward_linear,
@@ -343,7 +375,8 @@ Eigen::Affine3d AIWorkerBimanualMoveLControllerNode::currentObjectPose() const
   }
 
   Eigen::Affine3d object_pose = Eigen::Affine3d::Identity();
-  object_pose.translation() = 0.5 * (right_gripper_pose_.translation() + left_gripper_pose_.translation());
+  object_pose.translation() = 0.5 *
+    (right_gripper_pose_.translation() + left_gripper_pose_.translation());
   object_pose.linear() =
     cyclo_motion_controller::common::shortestSlerp(
       Eigen::Quaterniond(right_gripper_pose_.linear()),
@@ -413,7 +446,8 @@ void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
 
     const double right_elapsed = (this->now() - right_motion_start_time_).seconds();
     const double left_elapsed = (this->now() - left_motion_start_time_).seconds();
-    const double virtual_object_elapsed = (this->now() - virtual_object_motion_start_time_).seconds();
+    const double virtual_object_elapsed = (this->now() -
+      virtual_object_motion_start_time_).seconds();
 
     Eigen::Affine3d constrained_right_goal = right_movel_goal_pose_;
     Eigen::Affine3d constrained_left_goal = left_movel_goal_pose_;
@@ -456,9 +490,11 @@ void AIWorkerBimanualMoveLControllerNode::controlLoopCallback()
       constrained_right_goal = object_goal * grasp_object_to_right_;
       constrained_left_goal = object_goal * grasp_object_to_left_;
       right_feedforward_linear = object_feedforward_linear +
-        object_feedforward_angular.cross(constrained_right_goal.translation() - object_goal.translation());
+        object_feedforward_angular.cross(constrained_right_goal.translation() -
+          object_goal.translation());
       left_feedforward_linear = object_feedforward_linear +
-        object_feedforward_angular.cross(constrained_left_goal.translation() - object_goal.translation());
+        object_feedforward_angular.cross(constrained_left_goal.translation() -
+          object_goal.translation());
       right_feedforward_angular = object_feedforward_angular;
       left_feedforward_angular = object_feedforward_angular;
     } else {

@@ -72,7 +72,8 @@ public:
 
     goal_pub_ = this->create_publisher<robotis_interfaces::msg::MoveL>(goal_topic_, 10);
     if (!pose_goal_topic_.empty()) {
-      pose_goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(pose_goal_topic_, 10);
+      pose_goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(pose_goal_topic_,
+          10);
     }
     if (!active_topic_.empty()) {
       active_state_ = active_invert_;
@@ -102,9 +103,11 @@ public:
     RCLCPP_INFO(this->get_logger(), "  - Base frame: %s", base_frame_.c_str());
     RCLCPP_INFO(this->get_logger(), "  - Controlled link: %s", controlled_link_.c_str());
     if (!secondary_controlled_link_.empty()) {
-      RCLCPP_INFO(this->get_logger(), "  - Secondary controlled link: %s", secondary_controlled_link_.c_str());
+      RCLCPP_INFO(this->get_logger(), "  - Secondary controlled link: %s",
+          secondary_controlled_link_.c_str());
     }
-    RCLCPP_INFO(this->get_logger(), "  - Initialize at midpoint: %s", initialize_at_midpoint_ ? "true" : "false");
+    RCLCPP_INFO(this->get_logger(), "  - Initialize at midpoint: %s",
+        initialize_at_midpoint_ ? "true" : "false");
     RCLCPP_INFO(this->get_logger(), "  - Goal topic: %s", goal_topic_.c_str());
     if (!pose_goal_topic_.empty()) {
       RCLCPP_INFO(this->get_logger(), "  - Pose goal topic: %s", pose_goal_topic_.c_str());
@@ -247,9 +250,12 @@ private:
       if (!lookupPose(secondary_controlled_link_, secondary_pose)) {
         return;
       }
-      initial_pose_.pose.position.x = 0.5 * (initial_pose_.pose.position.x + secondary_pose.pose.position.x);
-      initial_pose_.pose.position.y = 0.5 * (initial_pose_.pose.position.y + secondary_pose.pose.position.y);
-      initial_pose_.pose.position.z = 0.5 * (initial_pose_.pose.position.z + secondary_pose.pose.position.z);
+      initial_pose_.pose.position.x = 0.5 *
+        (initial_pose_.pose.position.x + secondary_pose.pose.position.x);
+      initial_pose_.pose.position.y = 0.5 *
+        (initial_pose_.pose.position.y + secondary_pose.pose.position.y);
+      initial_pose_.pose.position.z = 0.5 *
+        (initial_pose_.pose.position.z + secondary_pose.pose.position.z);
       const Eigen::Quaterniond q_primary = Eigen::Quaterniond(
         initial_pose_.pose.orientation.w,
         initial_pose_.pose.orientation.x,
