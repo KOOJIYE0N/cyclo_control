@@ -184,10 +184,9 @@ void AIWorkerBimanualMoveLControllerNode::extractJointStates(
 
 void AIWorkerBimanualMoveLControllerNode::jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 {
-  if (joint_index_map_.empty()) {
-    for (size_t i = 0; i < msg->name.size(); ++i) {
-      joint_index_map_[msg->name[i]] = static_cast<int>(i);
-    }
+  joint_index_map_.clear();
+  for (size_t i = 0; i < msg->name.size(); ++i) {
+    joint_index_map_[msg->name[i]] = static_cast<int>(i);
   }
 
   extractJointStates(msg);
