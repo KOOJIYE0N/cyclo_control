@@ -348,11 +348,9 @@ def generate_launch_description():
         condition=IfCondition(
             PythonExpression(
                 [
-                    "('",
+                    "'",
                     controller_type,
-                    "' == 'movel' or '",
-                    controller_type,
-                    "' == 'movel') and '",
+                    "' == 'movel' and '",
                     start_interactive_marker,
                     "' == 'true'",
                 ]
@@ -383,11 +381,9 @@ def generate_launch_description():
         condition=IfCondition(
             PythonExpression(
                 [
-                    "('",
+                    "'",
                     controller_type,
-                    "' == 'movel' or '",
-                    controller_type,
-                    "' == 'movel') and '",
+                    "' == 'movel' and '",
                     start_interactive_marker,
                     "' == 'true'",
                 ]
