@@ -16,6 +16,8 @@ set(SOURCES
     src/controllers/ai_worker/vr_controller.cpp
     src/controllers/ai_worker/ai_worker_movej_controller.cpp
     src/controllers/ai_worker/ai_worker_movel_controller.cpp
+    src/controllers/ai_worker/ai_worker_bimanual_movel_controller.cpp
+    src/controllers/ai_worker/ai_worker_bimanual_movej_controller.cpp
     src/controllers/open_manipulator/open_manipulator_movej_controller.cpp
     src/controllers/open_manipulator/open_manipulator_movel_controller.cpp
 )

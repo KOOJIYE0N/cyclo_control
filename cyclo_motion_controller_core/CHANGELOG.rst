@@ -2,9 +2,11 @@
 Changelog for package cyclo_motion_controller_core
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-0.2.1 (2026-06-18)
+0.3.0 (2026-06-18)
 ------------------
-* None
+* Added AI Worker bimanual MoveL and MoveJ controller implementations with rigid grasp control support
+* Modified pinocchio header includes to match the latest version
+* Contributors: Yeonguk Kim
 
 0.2.0 (2026-05-04)
 ------------------
