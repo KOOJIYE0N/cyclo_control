@@ -2,6 +2,13 @@
 Changelog for package cyclo_control
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.3.0 (2026-06-18)
+------------------
+* Added bimanual MoveL and MoveJ controllers for AI Worker, including rigid grasp control support
+* Modified omx srdf to disable collision between link6 and link7
+* Modified pinocchio header includes to match the latest version
+* Contributors: Yeonguk Kim
+
 0.2.0 (2026-05-04)
 ------------------
 * Added arm retargeting feature for AI Worker vr controller

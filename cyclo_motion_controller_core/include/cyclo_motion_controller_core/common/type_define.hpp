@@ -24,9 +24,12 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 #include <unsupported/Eigen/MatrixFunctions>
 
+#include <algorithm>
 #include <cassert>
+#include <cmath>
 
 namespace cyclo_motion_controller
 {
@@ -34,6 +37,63 @@ namespace common
 {
 // 6D twist / spatial vector
 using Vector6d = Eigen::Matrix<double, 6, 1>;
+
+static inline Eigen::Matrix3d skewSymmetric(const Eigen::Vector3d & v)
+{
+  Eigen::Matrix3d s = Eigen::Matrix3d::Zero();
+  s(0, 1) = -v.z();
+  s(0, 2) = v.y();
+  s(1, 0) = v.z();
+  s(1, 2) = -v.x();
+  s(2, 0) = -v.y();
+  s(2, 1) = v.x();
+  return s;
+}
+
+static inline Eigen::Quaterniond normalizedQuaternion(const Eigen::Quaterniond & input)
+{
+  Eigen::Quaterniond quat = input;
+  if (!std::isfinite(quat.norm()) || quat.norm() < 1e-12) {
+    return Eigen::Quaterniond::Identity();
+  }
+  quat.normalize();
+  if (quat.w() < 0.0) {
+    quat.coeffs() *= -1.0;
+  }
+  return quat;
+}
+
+static inline Eigen::Quaterniond normalizedQuaternion(const Eigen::Matrix3d & rotation)
+{
+  return normalizedQuaternion(Eigen::Quaterniond(rotation));
+}
+
+static inline Eigen::Quaterniond shortestSlerp(
+  const Eigen::Quaterniond & from,
+  const Eigen::Quaterniond & to,
+  const double alpha)
+{
+  Eigen::Quaterniond qa = normalizedQuaternion(from);
+  Eigen::Quaterniond qb = normalizedQuaternion(to);
+  if (qa.dot(qb) < 0.0) {
+    qb.coeffs() *= -1.0;
+  }
+  return normalizedQuaternion(qa.slerp(std::clamp(alpha, 0.0, 1.0), qb));
+}
+
+static inline Eigen::Vector3d shortestOrientationError(
+  const Eigen::Matrix3d & goal_rotation,
+  const Eigen::Matrix3d & current_rotation)
+{
+  Eigen::Quaterniond error =
+    normalizedQuaternion(goal_rotation) * normalizedQuaternion(current_rotation).conjugate();
+  error = normalizedQuaternion(error);
+  const Eigen::AngleAxisd angle_axis_error(error);
+  if (!std::isfinite(angle_axis_error.angle()) || angle_axis_error.angle() <= 1e-9) {
+    return Eigen::Vector3d::Zero();
+  }
+  return angle_axis_error.axis() * angle_axis_error.angle();
+}
 
 namespace collision_checker
 {

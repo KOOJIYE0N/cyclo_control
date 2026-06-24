@@ -17,12 +17,16 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <Eigen/Geometry>
+
 #include <memory>
 #include <string>
 
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <interactive_markers/interactive_marker_server.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <robotis_interfaces/msg/move_l.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <visualization_msgs/msg/interactive_marker.hpp>
 #include <visualization_msgs/msg/interactive_marker_control.hpp>
 #include <visualization_msgs/msg/interactive_marker_feedback.hpp>
@@ -41,8 +45,18 @@ public:
     base_frame_ = this->declare_parameter<std::string>("base_frame", "base_link");
     controlled_link_ =
       this->declare_parameter<std::string>("controlled_link", "end_effector_link");
+    secondary_controlled_link_ =
+      this->declare_parameter<std::string>("secondary_controlled_link", "");
+    initialize_at_midpoint_ =
+      this->declare_parameter<bool>("initialize_at_midpoint", false);
     goal_topic_ =
       this->declare_parameter<std::string>("goal_topic", "/goal_pose");
+    pose_goal_topic_ =
+      this->declare_parameter<std::string>("pose_goal_topic", "");
+    active_topic_ =
+      this->declare_parameter<std::string>("active_topic", "");
+    active_invert_ =
+      this->declare_parameter<bool>("active_invert", false);
     server_name_ =
       this->declare_parameter<std::string>("server_name", "interactive_marker");
     marker_name_ =
@@ -57,6 +71,16 @@ public:
     marker_color_b_ = this->declare_parameter<double>("marker_color_b", 0.2);
 
     goal_pub_ = this->create_publisher<robotis_interfaces::msg::MoveL>(goal_topic_, 10);
+    if (!pose_goal_topic_.empty()) {
+      pose_goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(pose_goal_topic_,
+          10);
+    }
+    if (!active_topic_.empty()) {
+      active_state_ = active_invert_;
+      active_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        active_topic_, 10,
+        std::bind(&InteractiveMarkerNode::activeTopicCallback, this, std::placeholders::_1));
+    }
 
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -78,7 +102,20 @@ public:
     RCLCPP_INFO(this->get_logger(), "Interactive marker node started");
     RCLCPP_INFO(this->get_logger(), "  - Base frame: %s", base_frame_.c_str());
     RCLCPP_INFO(this->get_logger(), "  - Controlled link: %s", controlled_link_.c_str());
+    if (!secondary_controlled_link_.empty()) {
+      RCLCPP_INFO(this->get_logger(), "  - Secondary controlled link: %s",
+          secondary_controlled_link_.c_str());
+    }
+    RCLCPP_INFO(this->get_logger(), "  - Initialize at midpoint: %s",
+        initialize_at_midpoint_ ? "true" : "false");
     RCLCPP_INFO(this->get_logger(), "  - Goal topic: %s", goal_topic_.c_str());
+    if (!pose_goal_topic_.empty()) {
+      RCLCPP_INFO(this->get_logger(), "  - Pose goal topic: %s", pose_goal_topic_.c_str());
+    }
+    if (!active_topic_.empty()) {
+      RCLCPP_INFO(this->get_logger(), "  - Active topic: %s", active_topic_.c_str());
+      RCLCPP_INFO(this->get_logger(), "  - Active invert: %s", active_invert_ ? "true" : "false");
+    }
     RCLCPP_INFO(this->get_logger(), "  - Marker name: %s", marker_name_.c_str());
     RCLCPP_INFO(this->get_logger(), "  - Marker server: %s", server_name_.c_str());
   }
@@ -162,6 +199,9 @@ private:
   void markerFeedback(
     const visualization_msgs::msg::InteractiveMarkerFeedback::ConstSharedPtr & feedback)
   {
+    if (!active_state_) {
+      return;
+    }
     if (feedback->marker_name != marker_name_) {
       return;
     }
@@ -198,16 +238,48 @@ private:
     if (initialized_) {
       return;
     }
+    if (!active_state_) {
+      return;
+    }
 
     if (!lookupPose(controlled_link_, initial_pose_)) {
       return;
+    }
+    if (initialize_at_midpoint_ && !secondary_controlled_link_.empty()) {
+      geometry_msgs::msg::PoseStamped secondary_pose;
+      if (!lookupPose(secondary_controlled_link_, secondary_pose)) {
+        return;
+      }
+      initial_pose_.pose.position.x = 0.5 *
+        (initial_pose_.pose.position.x + secondary_pose.pose.position.x);
+      initial_pose_.pose.position.y = 0.5 *
+        (initial_pose_.pose.position.y + secondary_pose.pose.position.y);
+      initial_pose_.pose.position.z = 0.5 *
+        (initial_pose_.pose.position.z + secondary_pose.pose.position.z);
+      const Eigen::Quaterniond q_primary = Eigen::Quaterniond(
+        initial_pose_.pose.orientation.w,
+        initial_pose_.pose.orientation.x,
+        initial_pose_.pose.orientation.y,
+        initial_pose_.pose.orientation.z).normalized();
+      Eigen::Quaterniond q_secondary = Eigen::Quaterniond(
+        secondary_pose.pose.orientation.w,
+        secondary_pose.pose.orientation.x,
+        secondary_pose.pose.orientation.y,
+        secondary_pose.pose.orientation.z).normalized();
+      if (q_primary.dot(q_secondary) < 0.0) {
+        q_secondary.coeffs() *= -1.0;
+      }
+      const Eigen::Quaterniond q_mid = q_primary.slerp(0.5, q_secondary).normalized();
+      initial_pose_.pose.orientation.w = q_mid.w();
+      initial_pose_.pose.orientation.x = q_mid.x();
+      initial_pose_.pose.orientation.y = q_mid.y();
+      initial_pose_.pose.orientation.z = q_mid.z();
     }
 
     create6DofMarker(initial_pose_.pose, initial_pose_.header.frame_id);
     server_->applyChanges();
     publishGoal(initial_pose_.pose, initial_pose_.header.frame_id);
     initialized_ = true;
-    update_timer_->cancel();
 
     RCLCPP_INFO(this->get_logger(), "Interactive marker initialized from link transform.");
   }
@@ -230,23 +302,63 @@ private:
 
   void publishGoal(const geometry_msgs::msg::Pose & pose, const std::string & frame_id)
   {
+    if (!active_state_) {
+      return;
+    }
     robotis_interfaces::msg::MoveL goal_msg;
     goal_msg.pose.header.stamp = this->get_clock()->now();
     goal_msg.pose.header.frame_id = frame_id;
     goal_msg.pose.pose = pose;
     goal_msg.time_from_start = builtin_interfaces::msg::Duration();
     goal_pub_->publish(goal_msg);
+
+    if (pose_goal_pub_) {
+      geometry_msgs::msg::PoseStamped pose_msg;
+      pose_msg.header = goal_msg.pose.header;
+      pose_msg.pose = pose;
+      pose_goal_pub_->publish(pose_msg);
+    }
+  }
+
+  void activeTopicCallback(const std_msgs::msg::Bool::SharedPtr msg)
+  {
+    if (!msg) {
+      return;
+    }
+    const bool next_state = active_invert_ ? !msg->data : msg->data;
+    if (next_state == active_state_) {
+      return;
+    }
+    active_state_ = next_state;
+    if (!active_state_) {
+      server_->erase(marker_name_);
+      server_->applyChanges();
+      initialized_ = false;
+      dragging_ = false;
+      return;
+    }
+    initialized_ = false;
+    if (update_timer_) {
+      update_timer_->reset();
+    }
   }
 
   std::shared_ptr<interactive_markers::InteractiveMarkerServer> server_;
   rclcpp::Publisher<robotis_interfaces::msg::MoveL>::SharedPtr goal_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_goal_pub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr active_sub_;
   rclcpp::TimerBase::SharedPtr update_timer_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
   std::string base_frame_;
   std::string controlled_link_;
+  std::string secondary_controlled_link_;
+  bool initialize_at_midpoint_;
   std::string goal_topic_;
+  std::string pose_goal_topic_;
+  std::string active_topic_;
+  bool active_invert_ = false;
   std::string server_name_;
   std::string marker_name_;
   std::string marker_description_;
@@ -258,6 +370,7 @@ private:
 
   bool initialized_;
   bool dragging_;
+  bool active_state_ = true;
   geometry_msgs::msg::PoseStamped initial_pose_;
 };
 }  // namespace cyclo_motion_controller_ros
