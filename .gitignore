@@ -533,4 +533,7 @@ doc/
 *.ar
 
 **/key.pem
-**/cert.pem
+**/cert.pem*.pyc
+*.bak
+*.bak.*
+*.orig
